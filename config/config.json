@@ -3,8 +3,29 @@
     "version": "0.1.0",
     "log_level": "INFO",
     "log_file": "logs/TP_NFC.log",
-    "settings": {
-        "setting1": "value1",
-        "setting2": "value2"
+    "nfc": {
+        "reader_timeout": 5,
+        "auto_connect": true,
+        "beep_on_scan": true
+    },
+    "google_sheets": {
+        "spreadsheet_id": "1x1HvvfYYp-SlhljTP5lebyZLAu21PVNEDTAe8w3SR-A",
+        "credentials_file": "config/credentials.json",
+        "token_file": "config/token.json",
+        "scopes": ["https://www.googleapis.com/auth/spreadsheets"],
+        "sheet_name": "Sheet1"
+    },
+    "stations": [
+        "Reception",
+        "Lio",
+        "Juntos",
+        "Experimental",
+        "Unvrs"
+    ],
+    "ui": {
+        "window_title": "La Isla Bonita - Attendance Tracker",
+        "window_width": 600,
+        "window_height": 500,
+        "theme": "dark-blue"
     }
 }

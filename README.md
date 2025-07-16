@@ -15,7 +15,7 @@ A Python project with standardized structure and CI/CD integration.
 
 1. Clone the repository:
    ```
-   git clone https://github.com/YourUsername/TP_NFC.git
+   git clone https://github.com/ringmig/TP_NFC.git
    cd TP_NFC
    ```
 

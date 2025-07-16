@@ -32,3 +32,7 @@ ENV/
 
 # Log files
 logs/*.log
+
+# Configuration files
+config/credentials.json
+config/token.json
