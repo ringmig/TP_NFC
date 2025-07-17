@@ -36,3 +36,6 @@ logs/*.log
 # Configuration files
 config/credentials.json
 config/token.json
+
+# Other files
+*.DS_Store
