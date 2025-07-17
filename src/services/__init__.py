@@ -4,7 +4,7 @@
 Services package.
 """
 
-from .nfc_service import NFCService
+from .unified_nfc_service import UnifiedNFCService as NFCService
 from .google_sheets_service import GoogleSheetsService
 from .tag_manager import TagManager
 

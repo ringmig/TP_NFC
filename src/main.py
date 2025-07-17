@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-'''
+"""
 TP_NFC main application
 
-This is the entry point for the TP_NFC application.
+This is the entry point for the TP_NFC attendance tracking system.
 Configuration parameters should be modified in config/config.json, not in this file.
-'''
+"""
 
 import os
 import sys
@@ -17,6 +17,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils.logger import setup_logger
+from src.services import NFCService, GoogleSheetsService, TagManager
+from src.gui import create_gui
 
 
 def load_config():
@@ -41,17 +43,46 @@ def main():
     logger.info(f"Starting {config['app_name']} v{config['version']}")
     
     try:
-        # Application logic goes here
-        logger.info("Application initialized successfully")
+        # Initialize services
+        logger.info("Initializing services...")
         
-        # Example usage of settings
-        logger.debug(f"Settings: {config['settings']}")
+        # NFC Service
+        nfc_service = NFCService(logger)
+        if not nfc_service.connect():
+            logger.warning("Failed to connect to NFC reader - continuing anyway")
+            # Continue anyway - reader might be connected later
+        else:
+            logger.info("NFC reader connected successfully")
+        
+        # Google Sheets Service
+        sheets_service = GoogleSheetsService(config['google_sheets'], logger)
+        if not sheets_service.authenticate():
+            logger.warning("Failed to authenticate with Google Sheets - continuing anyway")
+            # Continue anyway - might work in offline mode
+        else:
+            logger.info("Google Sheets authenticated successfully")
+        
+        # Tag Manager
+        tag_manager = TagManager(nfc_service, sheets_service, logger)
+        logger.info("Tag manager initialized")
+        
+        # Create and run GUI
+        logger.info("Starting GUI application...")
+        app = create_gui(config, nfc_service, sheets_service, tag_manager, logger)
+        
+        # Run the GUI main loop
+        app.mainloop()
         
     except Exception as e:
         logger.error(f"An error occurred: {e}", exc_info=True)
         return 1
+    finally:
+        # Cleanup
+        if 'nfc_service' in locals() and nfc_service.is_connected:
+            nfc_service.disconnect()
+            logger.info("NFC service disconnected")
     
-    logger.info("Application finished successfully")
+    logger.info("Application finished")
     return 0
 
 

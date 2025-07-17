@@ -32,10 +32,28 @@ ENV/
 
 # Log files
 logs/*.log
+*.log
 
 # Configuration files
 config/credentials.json
 config/token.json
+config/token.pickle
+config/tag_registry.json
 
-# Other files
-*.DS_Store
+# OS files
+.DS_Store
+Thumbs.db
+
+# Legacy files
+legacy/
+
+# Test outputs
+test_*.log
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Temporary files
+*.tmp
+*.bak
+*~
