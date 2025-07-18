@@ -1,3 +1,3 @@
 @echo off
-call venv\Scripts\activate.bat
-python src\main.py
+REM Launch application hidden using PowerShell
+powershell -WindowStyle Hidden -Command "& { Set-Location '%~dp0'; .\venv\Scripts\Activate.ps1; python src\main.py }"
