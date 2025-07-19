@@ -7,6 +7,7 @@
 - [x] Cross-platform support (Windows & macOS)
 - [x] Logging system with file and console output
 - [x] Configuration management (config.json)
+- [x] Configurable window modes (normal/maximized/fullscreen)
 
 ### NFC Integration
 - [x] Unified NFC service with automatic backend selection
@@ -14,8 +15,8 @@
 - [x] NTAG213 tag reading capability
 - [x] Tag registry system for ID mapping
 - [x] Cross-platform compatibility:
-- [x] Windows: nfcpy with libusb
-- [x] macOS: pyscard with built-in drivers
+  - [x] Windows: nfcpy with libusb
+  - [x] macOS: pyscard with built-in drivers
 
 ### Google Sheets Integration
 - [x] OAuth2 authentication
@@ -32,13 +33,14 @@
 
 ### GUI Application ✅ COMPLETE
 - [x] Professional CustomTkinter interface with dark theme
-- [x] Fullscreen operation with platform-specific optimization
+- [x] Configurable window display (normal/maximized/fullscreen)
 - [x] Station switching with visual button highlights
 - [x] Dynamic content modes (Registration/Checkpoint/Settings)
-- [x] Guest list management with search/filtering
-- [x] Real-time status updates and sync indicators
+- [x] Smart guest list with multi-word search (order-independent)
+- [x] Real-time status updates with centralized messaging
 - [x] Manual check-in capabilities
-- [x] Settings panel with advanced operations
+- [x] Settings panel with reordered advanced operations
+- [x] Copyright branding in settings mode
 
 ### Advanced Features ✅ COMPLETE
 - [x] **Check-in Queue System**: Failsafe local storage with background sync
@@ -46,9 +48,19 @@
 - [x] **Sync Conflict Resolution**: Handles offline/online data discrepancies
 - [x] **Background Scanning**: Continuous NFC monitoring in checkpoint mode
 - [x] **Manual Check-in**: Direct guest ID check-in with station selection
-- [x] **Developer Mode**: Password-protected data clearing functions
+- [x] **Advanced Mode**: Password-protected data clearing functions
 - [x] **Log Viewer**: Built-in application log display
 - [x] **Tag Info Display**: Inline guest information from scanned tags
+- [x] **Smart Search**: Multi-word, order-independent guest filtering
+
+### User Experience Enhancements ✅ COMPLETE
+- [x] **Keyboard Shortcuts**: 
+  - Cmd/Ctrl+R for refresh
+  - Cmd/Ctrl+F for search focus
+  - F11 for window mode toggle
+- [x] **Centralized Status Messages**: Consistent mode-aware messaging
+- [x] **Visual Feedback**: Real-time countdown timers for operations
+- [x] **Smart UI**: Context-aware button visibility and functionality
 
 ### Registration Workflow ✅ COMPLETE
 - [x] ID validation against Google Sheets
@@ -110,13 +122,36 @@ All production-ready in requirements.txt:
 
 ## Current State: 🎉 PRODUCTION READY
 
-**Version 0.1.0 - Feature Complete**
+**Version 0.1.1 - Enhanced User Experience**
 
 - **NFC Operations**: ✅ Full tag management with dual backend support
 - **Google Sheets**: ✅ Complete integration with conflict resolution
-- **GUI Interface**: ✅ Professional fullscreen application 
+- **GUI Interface**: ✅ Professional configurable application with smart search
 - **Data Management**: ✅ Failsafe queue system with background sync
-- **User Experience**: ✅ Comprehensive error handling and feedback
+- **User Experience**: ✅ Enhanced keyboard shortcuts and centralized messaging
+
+## Recent Enhancements (v0.1.1)
+
+### Smart Search System
+- Multi-word search with order independence
+- Example: "Ahlerup Thomas" finds "Thomas Ahlerup"
+- Searches across ID, first name, last name, and full name
+
+### Configurable Window Modes
+- Normal, maximized, or fullscreen startup modes
+- Platform-specific optimizations for each mode
+- F11 toggle between modes during runtime
+
+### Enhanced User Interface
+- Centralized status messaging system
+- Keyboard shortcuts (Cmd/Ctrl+F for search, Cmd/Ctrl+R for refresh)
+- Reordered settings menu for better workflow
+- Copyright branding in settings mode
+
+### Improved Cross-Platform Support
+- Better macOS window management fallbacks
+- Enhanced error handling for different tkinter versions
+- Comprehensive logging for troubleshooting
 
 ## Advanced Implementation Highlights
 
