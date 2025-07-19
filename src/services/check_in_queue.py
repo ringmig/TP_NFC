@@ -211,6 +211,18 @@ class CheckInQueue:
                     successful.append(i)
                     self.logger.info(f"Synced check-in: {check_in['guest_name']} at {check_in['station']}")
                     any_synced = True
+
+                    # Remove from local cache since it's now in Google Sheets
+                    with self.lock:
+                        if check_in['original_id'] in self.local_check_ins:
+                            station_key = check_in['station'].lower()
+                            if station_key in self.local_check_ins[check_in['original_id']]:
+                                del self.local_check_ins[check_in['original_id']][station_key]
+                                # Remove guest entry if no more stations
+                                if not self.local_check_ins[check_in['original_id']]:
+                                    del self.local_check_ins[check_in['original_id']]
+                                # Save the updated cache
+                                self.save_queue()
                 else:
                     check_in['attempts'] += 1
                     check_in['last_attempt'] = datetime.now().isoformat()
@@ -232,7 +244,11 @@ class CheckInQueue:
         # Call sync completion callback if any items were synced
         if any_synced and self.sync_completion_callback:
             try:
-                self.sync_completion_callback()
+                # Schedule callback on main thread if possible (for GUI updates)
+                if hasattr(self.sync_completion_callback, '__self__') and hasattr(self.sync_completion_callback.__self__, 'after'):
+                    self.sync_completion_callback.__self__.after(0, self.sync_completion_callback)
+                else:
+                    self.sync_completion_callback()
             except Exception as e:
                 self.logger.error(f"Error in sync completion callback: {e}")
 

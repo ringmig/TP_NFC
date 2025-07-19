@@ -155,9 +155,7 @@ class TagManager:
 
         self.logger.info(f"Successfully registered tag {tag.uid} to {guest.full_name}")
 
-        # Also queue check-in at Reception when registering
-        timestamp = datetime.now().strftime("%H:%M")
-        self.check_in_queue.add_check_in(original_id, "Reception", timestamp, guest.full_name)
+        # NOTE: No auto-check-in for registration - let user decide when to check in
 
         return {
             'tag_uid': tag.uid,

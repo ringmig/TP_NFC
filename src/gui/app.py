@@ -83,6 +83,9 @@ class NFCApp(ctk.CTk):
         # Load initial data
         self.after(100, self.refresh_guest_data)
 
+        # Set up sync completion callback to update UI when background syncs complete
+        self.tag_manager.set_sync_completion_callback(self.on_sync_complete)
+
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -118,6 +121,12 @@ class NFCApp(ctk.CTk):
         # Add F11 to toggle maximized state
         self.bind('<F11>', self.toggle_fullscreen)
 
+        # Add refresh shortcuts (Cmd+R on Mac, Ctrl+R on Windows/Linux)
+        if system == "Darwin":  # macOS
+            self.bind('<Command-r>', self.on_refresh_shortcut)
+        else:  # Windows/Linux
+            self.bind('<Control-r>', self.on_refresh_shortcut)
+
     def toggle_fullscreen(self, event=None):
         """Toggle between maximized and normal window state."""
         system = platform.system()
@@ -141,6 +150,11 @@ class NFCApp(ctk.CTk):
 
         except Exception as e:
             self.logger.error(f"Error toggling fullscreen: {e}")
+
+    def on_refresh_shortcut(self, event=None):
+        """Handle refresh keyboard shortcut (Cmd+R / Ctrl+R)."""
+        self.refresh_guest_data()
+        return "break"  # Prevent default browser refresh behavior
 
     def setup_styles(self):
         """Configure fonts and styles."""
@@ -418,6 +432,10 @@ class NFCApp(ctk.CTk):
         if not self.tag_info_data:
             return
 
+        # Hide status bar only when Reception is in registration mode
+        if self.current_station == "Reception" and self.is_registration_mode and not self.is_checkpoint_mode:
+            self.status_frame.pack_forget()
+
         # Main container
         main_container = ctk.CTkFrame(self.content_frame, fg_color="transparent")
         main_container.pack(fill="both", expand=True)
@@ -485,7 +503,11 @@ class NFCApp(ctk.CTk):
         if hasattr(self, '_came_from_settings'):
             delattr(self, '_came_from_settings')
 
+        # Restore status bar if it was hidden
+        self.status_frame.pack(fill="x", pady=(10, 10))
+
         self.update_mode_content()
+        self.update_settings_button()  # Restore hamburger button
 
         # Resume scanning if in checkpoint mode
         if not self.is_registration_mode or self.is_checkpoint_mode:
@@ -503,6 +525,17 @@ class NFCApp(ctk.CTk):
 
     def create_settings_content(self):
         """Create settings content in the main content area."""
+        # Set appropriate status text based on mode - keep status bar visible
+        if self.current_station == "Reception" and self.is_registration_mode and not self.is_checkpoint_mode:
+            # Hide registration waiting text, keep status bar for other messages
+            self.update_status("", "normal")
+        elif self.is_checkpoint_mode or (not self.is_registration_mode):
+            # Show check-in waiting text for check-in modes
+            self.update_status("Ready. Waiting for Check-In", "normal")
+        else:
+            # Default for other stations
+            self.update_status("Ready. Waiting for Check-In", "normal")
+
         # Main container that fills and centers content
         main_container = ctk.CTkFrame(self.content_frame, fg_color="transparent")
         main_container.pack(fill="both", expand=True)
@@ -661,13 +694,18 @@ class NFCApp(ctk.CTk):
 
     def update_settings_button(self):
         """Update settings button appearance based on state."""
-        if self.settings_visible:
+        if self.is_displaying_tag_info:
+            # Hide hamburger button completely when in tag info view
+            self.settings_btn.pack_forget()
+        elif self.settings_visible:
+            self.settings_btn.pack(side="right", padx=20)
             self.settings_btn.configure(
                 text="✕",
                 fg_color="#dc3545",
                 hover_color="#c82333"
             )
         else:
+            self.settings_btn.pack(side="right", padx=20)
             self.settings_btn.configure(
                 text="☰",
                 fg_color="#4a4a4a",
@@ -754,7 +792,7 @@ class NFCApp(ctk.CTk):
         # Instructions
         instruction_label = ctk.CTkLabel(
             center_frame,
-            text="Enter Guest ID:",
+            text="Enter Guest ID or Tap Tag to Check:",
             font=self.fonts['heading']
         )
         instruction_label.pack(pady=(0, 20))
@@ -797,6 +835,74 @@ class NFCApp(ctk.CTk):
 
         # Focus on entry
         self.id_entry.focus()
+
+        # Start background tag scanning for registration mode
+        self.start_registration_tag_scanning()
+
+    def start_registration_tag_scanning(self):
+        """Start background tag scanning for registration mode."""
+        if self.is_registration_mode and not self.is_checkpoint_mode and not self.is_scanning:
+            self.is_scanning = True
+            self._registration_scan_loop()
+
+    def _registration_scan_loop(self):
+        """Background scanning loop for registration mode."""
+        if self.is_registration_mode and not self.is_checkpoint_mode and self.is_scanning:
+            thread = threading.Thread(target=self._scan_for_registration)
+            thread.daemon = True
+            thread.start()
+
+    def _scan_for_registration(self):
+        """Scan for tag info in registration mode."""
+        # Don't scan if another operation is in progress
+        if self.operation_in_progress:
+            self.after(1000, self._registration_scan_loop)
+            return
+
+        self.operation_in_progress = True
+        self._active_operations += 1
+
+        tag = self.nfc_service.read_tag(timeout=3)
+
+        if not tag:
+            self.operation_in_progress = False
+            self._active_operations -= 1
+            self.after(100, self._registration_scan_loop)
+            return
+
+        # Check if tag is registered
+        if tag.uid not in self.tag_manager.tag_registry:
+            self.operation_in_progress = False
+            self._active_operations -= 1
+            self.after(0, self.update_status, "Unregistered tag - ready for new registration", "info")
+            self.after(2000, self._restart_registration_scanning)
+            return
+
+        # Tag is registered - show info
+        original_id = self.tag_manager.tag_registry[tag.uid]
+        guest = self.sheets_service.find_guest_by_id(original_id)
+
+        if guest:
+            # Check reception check-in status
+            reception_checkin = guest.is_checked_in_at('reception')
+            local_checkin = self.tag_manager.check_in_queue.has_check_in(original_id, 'Reception')
+
+            if reception_checkin or local_checkin:
+                status_msg = f"{guest.firstname} {guest.lastname} - Already checked in"
+            else:
+                status_msg = f"{guest.firstname} {guest.lastname} - Registered but not checked in"
+        else:
+            status_msg = f"Tag registered to ID {original_id}"
+
+        self.operation_in_progress = False
+        self._active_operations -= 1
+        self.after(0, self.update_status, status_msg, "success")
+        self.after(3000, self._restart_registration_scanning)
+
+    def _restart_registration_scanning(self):
+        """Restart registration scanning after showing tag info."""
+        if self.is_registration_mode and not self.is_checkpoint_mode and self.is_scanning:
+            self._registration_scan_loop()
 
     def create_rewrite_content(self):
         """Create rewrite mode UI (similar to registration)."""
@@ -984,7 +1090,7 @@ class NFCApp(ctk.CTk):
             self.after(2000, self.clear_registration_form)
 
             # Refresh guest list after delay to ensure queue is updated and status is visible
-            self.after(2500, self.refresh_guest_data)
+            self.after(2500, lambda: self.refresh_guest_data(False))
         else:
             self.update_status("No tag detected", "error")
 
@@ -1048,6 +1154,8 @@ class NFCApp(ctk.CTk):
         if not tag:
             self.operation_in_progress = False
             self._active_operations -= 1
+            # Continue scanning after short delay
+            self.after(100, self._restart_scanning_after_timeout)
             return
 
         # Check if tag is registered
@@ -1055,6 +1163,8 @@ class NFCApp(ctk.CTk):
             self.operation_in_progress = False
             self._active_operations -= 1
             self.after(0, self.update_status, "Unregistered tag", "error")
+            # Continue scanning after showing error
+            self.after(2000, self._restart_scanning_after_error)
             return
 
         original_id = self.tag_manager.tag_registry[tag.uid]
@@ -1069,7 +1179,7 @@ class NFCApp(ctk.CTk):
             if sheets_checkin or local_checkin:
                 self.operation_in_progress = False
                 self._active_operations -= 1
-                self.after(0, self.update_status, f"Guest already checked in at {self.current_station}", "warning")
+                self.after(0, self.update_status, f"{guest.firstname} {guest.lastname} already checked in at {self.current_station}", "warning")
                 # Continue scanning after showing duplicate warning
                 self.after(2000, self._restart_scanning_after_duplicate)
                 return
@@ -1092,6 +1202,24 @@ class NFCApp(ctk.CTk):
         if should_scan:
             self._checkpoint_scan_loop()
 
+    def _restart_scanning_after_timeout(self):
+        """Restart scanning after timeout (no tag detected)."""
+        in_checkin_mode = not self.is_registration_mode or self.is_checkpoint_mode
+        allow_during_tag_info = self.is_displaying_tag_info and in_checkin_mode
+
+        should_scan = (in_checkin_mode and self.is_scanning) or allow_during_tag_info
+        if should_scan:
+            self._checkpoint_scan_loop()
+
+    def _restart_scanning_after_error(self):
+        """Restart scanning after error (unregistered tag)."""
+        in_checkin_mode = not self.is_registration_mode or self.is_checkpoint_mode
+        allow_during_tag_info = self.is_displaying_tag_info and in_checkin_mode
+
+        should_scan = (in_checkin_mode and self.is_scanning) or allow_during_tag_info
+        if should_scan:
+            self._checkpoint_scan_loop()
+
     def _checkin_complete(self, result: Optional[Dict]):
         """Handle check-in completion."""
         if result:
@@ -1102,7 +1230,7 @@ class NFCApp(ctk.CTk):
             self.update_status(f"Checked in: {result['guest_name']}", "success")
 
             # Add delay to ensure status visible before refresh
-            self.after(2500, self.refresh_guest_data)
+            self.after(2500, lambda: self.refresh_guest_data(False))
 
             # Reset after delay
             self.after(3000, lambda: self.checkpoint_status.configure(
@@ -1307,6 +1435,7 @@ class NFCApp(ctk.CTk):
                     'check_ins': tag_info['check_ins']
                 }
                 self.update_mode_content()
+                self.update_settings_button()  # Hide hamburger button when in tag info mode
 
                 # Resume background scanning only if in check-in mode
                 if self.is_checkpoint_mode or (not self.is_registration_mode):
@@ -1795,9 +1924,10 @@ class NFCApp(ctk.CTk):
         else:
             self.sync_status_label.configure(text="✓ All synced", text_color="#4CAF50")
 
-    def refresh_guest_data(self):
+    def refresh_guest_data(self, show_confirmation=True):
         """Refresh guest data from Google Sheets."""
         self.update_status("Refreshing data...", "info")
+        self._is_user_initiated_refresh = show_confirmation
 
         # Run in thread
         thread = threading.Thread(target=self._refresh_guest_data_thread)
@@ -1866,6 +1996,11 @@ class NFCApp(ctk.CTk):
         registry_stats = self.tag_manager.get_registry_stats()
         if registry_stats['pending_syncs'] > 0:
             self.sync_status_label.configure(text=f"⏳ {registry_stats['pending_syncs']} pending", text_color="#ff9800")
+
+            # Force sync on startup if there are pending items
+            if not hasattr(self, '_initial_load_complete'):
+                self.logger.info(f"Found {registry_stats['pending_syncs']} pending syncs at startup - forcing sync")
+                self.after(1000, self._force_sync_on_startup)
         else:
             self.sync_status_label.configure(text="✓ All synced", text_color="#4CAF50")
 
@@ -1882,10 +2017,14 @@ class NFCApp(ctk.CTk):
             else:
                 self.after(2000, lambda: self.update_status("Ready. Waiting for Check-In", "normal"))
             self._initial_load_complete = True
+        elif hasattr(self, '_is_user_initiated_refresh') and self._is_user_initiated_refresh:
+            # Show confirmation for any user-initiated refresh (button or shortcut)
+            self.update_status(f"✓ Refreshed {len(guests)} guests", "success")
+            delattr(self, '_is_user_initiated_refresh')  # Clean up flag
         elif self.is_rewrite_mode:
             # In rewrite mode, go straight to paused status
             self.update_status("Check-In Paused", "warning")
-        # No refresh messages - refresh silently
+        # No refresh messages for silent background refreshes
 
     def filter_guest_list(self):
         """Filter guest list based on search."""
@@ -2266,6 +2405,33 @@ class NFCApp(ctk.CTk):
                 else:
                     self.update_status("Ready. Waiting for Check-In", "normal", False)
             self._fade_timer = self.after(2000, fade_to_default)
+
+    def on_sync_complete(self):
+        """Called when background sync completes - silently update UI."""
+        # Refresh guest data silently (no status messages)
+        thread = threading.Thread(target=self._refresh_guest_data_thread)
+        thread.daemon = True
+        self._is_user_initiated_refresh = False  # Silent refresh
+        thread.start()
+
+    def _force_sync_on_startup(self):
+        """Force sync of pending items on startup."""
+        try:
+            pending_count = self.tag_manager.check_in_queue.force_sync()
+            if pending_count == 0:
+                self.logger.info("All pending syncs completed successfully")
+                # Update sync status after successful sync
+                self.after(500, self._update_sync_status_after_force)
+            else:
+                self.logger.warning(f"{pending_count} items still pending after force sync")
+        except Exception as e:
+            self.logger.error(f"Error during startup force sync: {e}")
+
+    def _update_sync_status_after_force(self):
+        """Update sync status after force sync completes."""
+        registry_stats = self.tag_manager.get_registry_stats()
+        if registry_stats['pending_syncs'] == 0:
+            self.sync_status_label.configure(text="✓ All synced", text_color="#4CAF50")
 
     def on_closing(self):
         """Handle window closing."""
