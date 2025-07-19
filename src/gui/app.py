@@ -87,7 +87,7 @@ class NFCApp(ctk.CTk):
         self.load_logo()
 
         # Load initial data
-        self.after(100, self.refresh_guest_data)
+        self.after(100, lambda: self.refresh_guest_data(user_initiated=False))
 
         # Set up sync completion callback to update UI when background syncs complete
         self.tag_manager.set_sync_completion_callback(self.on_sync_complete)
@@ -264,7 +264,7 @@ class NFCApp(ctk.CTk):
 
     def on_refresh_shortcut(self, event=None):
         """Handle refresh keyboard shortcut (Cmd+R / Ctrl+R)."""
-        self.refresh_guest_data()
+        self.refresh_guest_data(user_initiated=True)
         return "break"  # Prevent default browser refresh behavior
 
     def on_search_shortcut(self, event=None):
@@ -528,10 +528,10 @@ class NFCApp(ctk.CTk):
                        relief="flat",
                        font=("TkFixedFont", 13, "bold"))
 
-        # Map item states to colors
+        # Map item states to colors - include hover (active) state
         style.map('Treeview',
-                  background=[('selected', '#4a4a4a')],
-                  foreground=[('selected', 'white')])
+                  background=[('selected', '#4a4a4a'), ('active', '#ff9800')],
+                  foreground=[('selected', 'white'), ('active', 'white')])
 
         # Bind selection
         self.guest_tree.bind("<Double-Button-1>", self.on_guest_select)
@@ -1096,8 +1096,16 @@ class NFCApp(ctk.CTk):
 
         # Tag is registered - check for duplicates
         original_id = self.tag_manager.tag_registry[tag.uid]
-        # Get fresh data from Google Sheets
-        guest = self.sheets_service.find_guest_by_id(original_id)
+
+        # Get fresh data from Google Sheets with error handling
+        try:
+            guest = self.sheets_service.find_guest_by_id(original_id)
+        except Exception as e:
+            # Network/connection error - don't show "missing guest" message
+            self._active_operations -= 1
+            self.after(0, self.update_status, "Network error - check connection", "error")
+            self.after(3000, self._restart_registration_scanning)
+            return
 
         if guest:
             # Check for duplicate check-ins at current station
@@ -1126,10 +1134,9 @@ class NFCApp(ctk.CTk):
                 status_msg = f"{guest.firstname} {guest.lastname} - Ready for check-in"
                 status_type = "success"
         else:
-            # Guest not found in Google Sheets
+            # Guest not found in Google Sheets - skip showing message, let checkpoint scanning handle it
             self.logger.warning(f"Tag {tag.uid} registered to ID {original_id} but guest not found in Google Sheets")
             self._active_operations -= 1
-            self.after(0, self.update_status, f"Tag registered to missing guest ID {original_id}", "warning")
             self.after(3000, self._restart_registration_scanning)
             return
 
@@ -1190,8 +1197,8 @@ class NFCApp(ctk.CTk):
             center_frame,
             text="X",
             command=self.exit_rewrite_mode,
-            width=200,
-            height=40,
+            width=50,
+            height=50,
             corner_radius=8,
             font=CTkFont(size=14, weight="bold"),
             fg_color="#dc3545",
@@ -1329,7 +1336,7 @@ class NFCApp(ctk.CTk):
             self.after(2000, self.clear_registration_form)
 
             # Refresh guest list after delay to ensure queue is updated and status is visible
-            self.after(2500, lambda: self.refresh_guest_data(False))
+            self.after(2500, lambda: self.refresh_guest_data(user_initiated=False))
         else:
             self.update_status("No tag detected", "error")
 
@@ -1406,8 +1413,23 @@ class NFCApp(ctk.CTk):
 
         original_id = self.tag_manager.tag_registry[tag.uid]
 
-        # Get guest info and check for duplicates
-        guest = self.sheets_service.find_guest_by_id(original_id)
+        # Get guest info and check for duplicates with error handling
+        try:
+            guest = self.sheets_service.find_guest_by_id(original_id)
+        except Exception as e:
+            # Network/connection error - don't show "missing guest" message
+            self._active_operations -= 1
+            self.after(0, self.update_status, "Network error - check connection", "error")
+            self.after(2000, self._restart_scanning_after_error)
+            return
+
+        if not guest:
+            # Guest not found in Google Sheets - silently skip, registration scanning will handle the message
+            self._active_operations -= 1
+            # Continue scanning after showing error
+            self.after(2000, self._restart_scanning_after_error)
+            return
+
         if guest:
             try:
                 # Check both Google Sheets and local queue with error handling (consistent lowercase)
@@ -1416,8 +1438,19 @@ class NFCApp(ctk.CTk):
 
                 if sheets_checkin or local_checkin:
                     self._active_operations -= 1
-                    guest_name = getattr(guest, 'firstname', 'Unknown') + ' ' + getattr(guest, 'lastname', '')
-                    self.after(0, self.update_status, f"{guest_name.strip()} already checked in at {self.current_station}", "warning")
+                    # Get check-in time for consistent messaging like registration mode
+                    local_check_ins = self.tag_manager.get_all_local_check_ins()
+                    guest_local_data = local_check_ins.get(original_id, {})
+                    local_time = guest_local_data.get(self.current_station.lower())
+                    sheets_time = guest.get_check_in_time(self.current_station.lower())
+                    checkin_time = sheets_time or local_time
+
+                    if checkin_time:
+                        status_msg = f"{guest.firstname} {guest.lastname} already checked in at {self.current_station} at {checkin_time}"
+                    else:
+                        status_msg = f"{guest.firstname} {guest.lastname} already checked in at {self.current_station}"
+
+                    self.after(0, self.update_status, status_msg, "warning")
                     # Continue scanning after showing duplicate warning
                     self.after(2000, self._restart_scanning_after_duplicate)
                     return
@@ -1556,6 +1589,21 @@ class NFCApp(ctk.CTk):
         # Set appropriate status based on mode context
         self.update_status_respecting_settings_mode("Erase cancelled", "warning")
         self._cleanup_erase_settings()
+
+        # Restart scanning if appropriate
+        self._restart_scanning_after_erase()
+
+    def _restart_scanning_after_erase(self):
+        """Restart scanning after erase operation if appropriate."""
+        # Restart scanning based on current mode
+        if self.current_station == "Reception":
+            if self.is_registration_mode and not self.is_checkpoint_mode:
+                self.start_registration_tag_scanning()
+            elif self.is_checkpoint_mode:
+                self.start_checkpoint_scanning()
+        else:
+            # Non-Reception stations always use checkpoint scanning
+            self.start_checkpoint_scanning()
 
     def _cleanup_erase_settings(self):
         """Clean up erase UI in settings."""
@@ -1735,8 +1783,12 @@ class NFCApp(ctk.CTk):
         self._cleanup_tag_info()
 
         if tag_info:
-            # Find guest details
-            guest = self.sheets_service.find_guest_by_id(tag_info['original_id'])
+            # Find guest details with error handling
+            try:
+                guest = self.sheets_service.find_guest_by_id(tag_info['original_id'])
+            except Exception as e:
+                self.update_status("Network error - check connection", "error")
+                return
 
             if guest:
                 # Clear settings mode and switch to inline display mode
@@ -1746,6 +1798,8 @@ class NFCApp(ctk.CTk):
                     'guest': guest,
                     'check_ins': tag_info['check_ins']
                 }
+                # Clear countdown status message
+                self.update_status("", "normal")
                 self.update_mode_content()
                 self.update_settings_button()  # Hide hamburger button when in tag info mode
 
@@ -1930,7 +1984,7 @@ class NFCApp(ctk.CTk):
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # Title
-        title_label = ctk.CTkLabel(main_frame, text="⚠️ Developer Mode ⚠️", font=self.fonts['heading'])
+        title_label = ctk.CTkLabel(main_frame, text="", font=self.fonts['heading'])
         title_label.pack(pady=(20, 30))
 
         # Clear All Data button
@@ -2038,7 +2092,7 @@ class NFCApp(ctk.CTk):
             if success:
                 self.after(0, self.update_status, "✓ All data cleared successfully", "success")
                 # Refresh to show empty list
-                self.after(1000, self.refresh_guest_data)
+                self.after(1000, lambda: self.refresh_guest_data(user_initiated=False))
             else:
                 self.after(0, self.update_status, "Failed to clear Google Sheets data", "error")
 
@@ -2090,8 +2144,12 @@ class NFCApp(ctk.CTk):
         self.update_mode_content()
         self.update_status(f"Switched to {station}", "info")
 
+        # Start checkpoint scanning for non-Reception stations
+        if station != "Reception":
+            self.start_checkpoint_scanning()
+
         # Auto-refresh guest list to show station-specific check-ins
-        self.refresh_guest_data()
+        self.refresh_guest_data(user_initiated=False)
 
     def update_station_buttons(self):
         """Update station button styling to highlight current selection."""
@@ -2278,7 +2336,9 @@ class NFCApp(ctk.CTk):
             self.logger.error(f"Failed to fetch from Google Sheets: {e}")
             # Still update table with existing data to show local check-ins
             self.after(0, self._update_guest_table, self.guests_data)
-            self.after(0, self.update_sync_status, "Using cached data (Google Sheets offline)", "warning")
+            # Only show cached data message for user-initiated refreshes, not automatic ones
+            if hasattr(self, '_is_user_initiated_refresh') and self._is_user_initiated_refresh:
+                self.after(0, self.update_sync_status, "Using cached data (Google Sheets offline)", "warning")
 
     def _update_guest_table(self, guests: List):
         """Update the guest table with new data."""
@@ -2369,6 +2429,10 @@ class NFCApp(ctk.CTk):
             else:
                 self.after(2000, lambda: self.update_status_respecting_settings_mode(self.get_ready_status_message(), "normal"))
             self._initial_load_complete = True
+
+            # Start registration scanning after initial load if in registration mode
+            if self.is_registration_mode and not self.is_checkpoint_mode:
+                self.after(2500, self.start_registration_tag_scanning)
         elif hasattr(self, '_is_user_initiated_refresh') and self._is_user_initiated_refresh:
             # Show confirmation if refresh was done in settings
             if self.settings_visible:
@@ -2758,37 +2822,37 @@ class NFCApp(ctk.CTk):
             self.exit_rewrite_btn.configure(state="normal")
 
     def on_tree_motion(self, event):
-        """Handle mouse motion over tree for cursor changes."""
+        """Handle mouse motion over tree for cursor changes and hover styling."""
         # Get the item and column under mouse
         item = self.guest_tree.identify("item", event.x, event.y)
         column = self.guest_tree.identify("column", event.x, event.y)
 
-        # Station column indices start from 4th column (index starts at 1 for identify)
-        station_column_indices = [str(4 + i) for i in range(len(self.config['stations']))]
+        # Clear previous hover styling
+        if self.hovered_item:
+            current_tags = list(self.guest_tree.item(self.hovered_item, "tags"))
+            if "checkin_hover" in current_tags:
+                current_tags.remove("checkin_hover")
+                self.guest_tree.item(self.hovered_item, tags=current_tags)
+            self.hovered_item = None
 
-        # Check if hovering over a station column with "Check-in" text
-        if item and column in station_column_indices and self.checkin_buttons_visible:
-            values = self.guest_tree.item(item, "values")
-            column_index = int(column) - 1  # Convert to 0-based index
-
-            if column_index < len(values) and values[column_index] == "Check-in":
-                # Update hovered item for visual feedback
-                if self.hovered_item != item:
-                    # Remove hover from previous item
-                    if self.hovered_item:
-                        self.guest_tree.item(self.hovered_item, tags=())
-
-                    # Add hover to current item
-                    self.guest_tree.item(item, tags=("checkin_hover",))
+        # Check if hovering over check-in button in any station column
+        if item and column:
+            column_index = int(column.replace('#', '')) - 1
+            # Station columns start at index 3 (after id, first, last)
+            if column_index >= 3 and column_index < 3 + len(self.config['stations']):
+                values = self.guest_tree.item(item, "values")
+                if len(values) > column_index and values[column_index] == "Check-in":
+                    # Apply hover styling
+                    current_tags = list(self.guest_tree.item(item, "tags"))
+                    current_tags.append("checkin_hover")
+                    self.guest_tree.item(item, tags=current_tags)
                     self.hovered_item = item
 
-                self.guest_tree.configure(cursor="hand2")
-                return
+                    # Set hand cursor
+                    self.guest_tree.configure(cursor="hand2")
+                    return
 
-        # Reset cursor and hover state
-        if self.hovered_item:
-            self.guest_tree.item(self.hovered_item, tags=())
-            self.hovered_item = None
+        # Reset cursor
         self.guest_tree.configure(cursor="")
 
     def on_tree_click(self, event):
@@ -2802,26 +2866,24 @@ class NFCApp(ctk.CTk):
         item = self.guest_tree.identify("item", event.x, event.y)
         column = self.guest_tree.identify("column", event.x, event.y)
 
-        # Station column indices start from 4th column (index starts at 1 for identify)
-        station_column_indices = [str(4 + i) for i in range(len(self.config['stations']))]
-
-        # Only handle clicks on station columns when manual check-in is enabled
-        if column not in station_column_indices or not self.checkin_buttons_visible:
+        if not item or not column:
             return
 
-        # Get current values
-        values = self.guest_tree.item(item, "values")
-        column_index = int(column) - 1  # Convert to 0-based index
+        column_index = int(column.replace('#', '')) - 1
+        # Station columns start at index 3 (after id, first, last)
+        if column_index >= 3 and column_index < 3 + len(self.config['stations']):
+            values = self.guest_tree.item(item, "values")
 
-        # Check if the clicked cell contains "Check-in"
-        if column_index >= len(values) or values[column_index] != "Check-in":
-            return
+            # Only proceed if it says "Check-in"
+            if len(values) > column_index and values[column_index] == "Check-in":
+                guest_id = int(values[0])  # Ensure guest_id is int
+                station = self.config['stations'][column_index - 3]
 
-        # Get guest ID and station name
-        guest_id = values[0]
-        station = self.config['stations'][column_index - 3]  # Adjust for ID, first, last columns
+                # Disable the click temporarily to prevent double-clicks
+                self.guest_tree.configure(cursor="wait")
+                self.after(1000, lambda: self.guest_tree.configure(cursor=""))
 
-        self.quick_checkin(guest_id, station)
+                self.quick_checkin(guest_id, station)
 
     def quick_checkin(self, guest_id, station=None):
         """Perform quick check-in for a guest at specific station."""
@@ -2840,24 +2902,18 @@ class NFCApp(ctk.CTk):
     def _quick_checkin_thread(self, guest_id: int, station: str):
         """Thread function for quick check-in."""
         try:
-            # Get current time
-            timestamp = datetime.now().strftime("%H:%M")
+            # Use tag manager for manual check-in (uses local queue)
+            result = self.tag_manager.manual_check_in(guest_id, station)
 
-            # Mark attendance
-            success = self.sheets_service.mark_attendance(guest_id, station, timestamp)
-
-            if success:
-                # Also update local queue to show immediate feedback
-                self.tag_manager.check_in_queue.add_check_in(
-                    guest_id, station.lower(), timestamp
-                )
-
-                self.after(0, self.refresh_guest_data)
-                self.after(0, self.update_status, f"✓ Checked in guest {guest_id} at {station}", "success")
+            if result:
+                self.after(0, self.update_status, f"✓ Checked in {result['guest_name']} at {station}", "success")
+                # Delay refresh to ensure status is visible for minimum 2s
+                self.after(2500, lambda: self.refresh_guest_data(user_initiated=False))
             else:
-                self.after(0, self.update_status, f"Failed to check in guest {guest_id}", "error")
+                self.after(0, self.update_status, f"Guest ID {guest_id} not found", "error")
         except Exception as e:
-            self.after(0, self.update_status, f"Error: {str(e)}", "error")
+            self.logger.error(f"Manual check-in error: {e}")
+            self.after(0, self.update_status, f"Check-in failed: {str(e)}", "error")
 
     def _force_sync_on_startup(self):
         """Force sync of pending items found at startup."""
@@ -2887,19 +2943,22 @@ class NFCApp(ctk.CTk):
         color = color_map.get(status_type, "#ffffff")
         self.status_label.configure(text=message, text_color=color)
 
-        # Auto-clear success/info messages after delay
-        if auto_clear and status_type in ["success", "info"] and message:
-            self.after(5000, lambda: self._auto_clear_status(message))
+        # Auto-clear all messages after 2 seconds except countdowns
+        if auto_clear and status_type in ["success", "info", "warning", "error"] and message:
+            self.after(2000, lambda: self._auto_clear_status(message))
 
     def _auto_clear_status(self, original_message: str):
         """Auto-clear status if it hasn't changed."""
         current_text = self.status_label.cget("text")
         if current_text == original_message:
-            # Only clear if we're not in a special mode
+            # Only clear if we're not in a special mode, but allow clearing success messages in settings
             if self.is_rewrite_mode:
                 self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
             elif not self.settings_visible:
                 self.update_status(self.get_ready_status_message(), "normal")
+            elif self.settings_visible and original_message == "✓ Refreshed":
+                # Clear refresh success message in settings mode
+                self.update_status("", "normal")
 
     def load_logo(self):
         """Load and display logo."""
