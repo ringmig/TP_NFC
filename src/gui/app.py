@@ -36,6 +36,7 @@ class NFCApp(ctk.CTk):
         # State
         self.current_station = "Reception"
         self.is_registration_mode = True
+        self.is_checkpoint_mode = False  # New state for Reception checkpoint scanning
         self.guest_list_visible = False
         self.checkin_buttons_visible = False  # Hidden by default
         self.settings_visible = False  # Settings panel visibility
@@ -49,6 +50,12 @@ class NFCApp(ctk.CTk):
 
         # Track hovered item for styling
         self.hovered_item = None
+
+        # Operation tracking
+        self.operation_in_progress = False
+        self.last_sync_count = 0
+        self._active_operations = 0  # Track active operations
+        self.is_refreshing = False  # Flag to prevent concurrent refreshes
 
         # Window setup
         self.title(config['ui']['window_title'])
@@ -234,12 +241,13 @@ class NFCApp(ctk.CTk):
         self.status_frame.pack(fill="x", pady=(10, 10))
         self.status_frame.pack_propagate(False)
 
+        # Left side - main status
         self.status_label = ctk.CTkLabel(
             self.status_frame,
             text="Ready",
             font=self.fonts['status']
         )
-        self.status_label.pack(expand=True)
+        self.status_label.pack(side="left", expand=True)
 
     def create_action_buttons(self):
         """Create action buttons."""
@@ -249,6 +257,20 @@ class NFCApp(ctk.CTk):
         # Right frame for buttons
         right_frame = ctk.CTkFrame(button_frame, fg_color="transparent")
         right_frame.pack(side="right")
+
+        # Reception mode toggle button (only visible at Reception)
+        self.reception_mode_btn = ctk.CTkButton(
+            right_frame,
+            text="Switch to Check-in Mode",
+            command=self.toggle_reception_mode,
+            width=180,
+            height=35,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#2196F3",
+            hover_color="#1976D2"
+        )
+        # Initially hidden, will show only at Reception
 
         # Manual check-in button
         self.manual_checkin_btn = ctk.CTkButton(
@@ -285,6 +307,15 @@ class NFCApp(ctk.CTk):
             width=200
         )
         self.search_entry.pack(side="left")
+
+        # Sync status label (on same line as search)
+        self.sync_status_label = ctk.CTkLabel(
+            search_frame,
+            text="",
+            font=self.fonts['body'],
+            text_color="#4CAF50"
+        )
+        self.sync_status_label.pack(side="left", padx=(20, 0))
 
         # Guest list (using tkinter Treeview for table)
         self.create_guest_table()
@@ -382,7 +413,7 @@ class NFCApp(ctk.CTk):
         # Settings title
         settings_title = ctk.CTkLabel(
             center_frame,
-            text="Tools",
+            text="Tools 🔧",
             font=self.fonts['heading']
         )
         settings_title.pack(pady=(0, 30))
@@ -405,9 +436,12 @@ class NFCApp(ctk.CTk):
         )
         self.refresh_btn.pack(pady=10)
 
-        # Erase Tag button
+        # Erase Tag button with frame for cancel button
+        erase_frame = ctk.CTkFrame(buttons_container, fg_color="transparent")
+        erase_frame.pack(pady=10)
+
         self.settings_erase_btn = ctk.CTkButton(
-            buttons_container,
+            erase_frame,
             text="Erase Tag",
             command=self.erase_tag_settings,
             width=200,
@@ -417,11 +451,14 @@ class NFCApp(ctk.CTk):
             fg_color="#dc3545",
             hover_color="#c82333"
         )
-        self.settings_erase_btn.pack(pady=10)
+        self.settings_erase_btn.pack(side="left")
 
-        # Tag Info button
+        # Tag Info button with frame for cancel button
+        tag_info_frame = ctk.CTkFrame(buttons_container, fg_color="transparent")
+        tag_info_frame.pack(pady=10)
+
         self.tag_info_btn = ctk.CTkButton(
-            buttons_container,
+            tag_info_frame,
             text="Tag Info",
             command=self.tag_info,
             width=200,
@@ -431,7 +468,7 @@ class NFCApp(ctk.CTk):
             fg_color="#2196F3",
             hover_color="#1976D2"
         )
-        self.tag_info_btn.pack(pady=10)
+        self.tag_info_btn.pack(side="left")
 
         # Rewrite Tag button
         self.rewrite_tag_btn = ctk.CTkButton(
@@ -558,9 +595,19 @@ class NFCApp(ctk.CTk):
         # Update button visibility
         self.manual_checkin_btn.configure(text="Manual Check-in")
 
+        # Show Reception mode toggle only at Reception station
+        if self.current_station == "Reception":
+            self.reception_mode_btn.pack(side="left", padx=5)
+            if self.is_checkpoint_mode:
+                self.reception_mode_btn.configure(text="Switch to Registration Mode")
+            else:
+                self.reception_mode_btn.configure(text="Switch to Check-in Mode")
+        else:
+            self.reception_mode_btn.pack_forget()
+
         if self.is_rewrite_mode:
             self.create_rewrite_content()
-        elif self.is_registration_mode:
+        elif self.is_registration_mode and not self.is_checkpoint_mode:
             self.create_registration_content()
         else:
             # Checkpoint mode
@@ -719,6 +766,10 @@ class NFCApp(ctk.CTk):
             self.update_status("Invalid ID format", "error")
             return
 
+        # Mark operation in progress
+        self.operation_in_progress = True
+        self._active_operations += 1  # Track operation start
+
         # Disable UI during operation
         self.write_btn.configure(state="disabled")
         self.id_entry.configure(state="disabled")
@@ -749,6 +800,7 @@ class NFCApp(ctk.CTk):
     def cancel_write(self):
         """Cancel write operation."""
         self._write_operation_active = False
+        self._active_operations -= 1  # Operation cancelled
         self.nfc_service.cancel_read()
         self.update_status("Write operation cancelled", "warning")
         self._cleanup_write_ui()
@@ -785,6 +837,10 @@ class NFCApp(ctk.CTk):
 
     def _write_complete(self, result: Optional[Dict]):
         """Handle write completion."""
+        # Mark operation complete
+        self.operation_in_progress = False
+        self._active_operations -= 1  # Operation finished
+
         # Clean up UI
         self._cleanup_write_ui()
 
@@ -792,19 +848,11 @@ class NFCApp(ctk.CTk):
             self.update_status(f"✓ Registered to {result['guest_name']}", "success")
             self.guest_name_label.configure(text=result['guest_name'])
 
-            # Also check in at Reception
-            try:
-                timestamp = datetime.now().strftime("%H:%M")
-                self.sheets_service.mark_attendance(result['original_id'], "Reception", timestamp)
-                self.logger.info(f"Also checked in {result['guest_name']} at Reception")
-            except Exception as e:
-                self.logger.error(f"Failed to check in at Reception: {e}")
-
             # Clear form after delay
             self.after(2000, self.clear_registration_form)
 
-            # Refresh guest list to show check-in
-            self.refresh_guest_data()
+            # Refresh guest list after delay to ensure queue is updated
+            self.after(100, self.refresh_guest_data)
         else:
             self.update_status("No tag detected", "error")
 
@@ -820,15 +868,29 @@ class NFCApp(ctk.CTk):
         elif not self.settings_visible:
             self.update_status("Ready", "normal")
 
+    def toggle_reception_mode(self):
+        """Toggle between Registration and Checkpoint mode at Reception."""
+        if self.current_station == "Reception":
+            self.is_checkpoint_mode = not self.is_checkpoint_mode
+            if self.is_checkpoint_mode:
+                self.is_scanning = False  # Stop any existing scanning
+                self.update_status("Switched to Check-in Mode", "info")
+            else:
+                self.is_scanning = False  # Stop checkpoint scanning
+                self.update_status("Switched to Registration Mode", "info")
+            self.update_mode_content()
+
     def start_checkpoint_scanning(self):
         """Start continuous scanning for checkpoint mode."""
-        if not self.is_registration_mode and not self.is_scanning:
+        # Allow checkpoint scanning at Reception if in checkpoint mode
+        if (not self.is_registration_mode or self.is_checkpoint_mode) and not self.is_scanning:
             self.is_scanning = True
             self._checkpoint_scan_loop()
 
     def _checkpoint_scan_loop(self):
         """Continuous scanning loop for checkpoint mode."""
-        if not self.is_registration_mode and self.is_scanning:
+        # Check if we should continue scanning (handles both regular checkpoint and Reception checkpoint mode)
+        if ((not self.is_registration_mode or self.is_checkpoint_mode) and self.is_scanning):
             # Start scan in thread
             thread = threading.Thread(target=self._scan_for_checkin)
             thread.daemon = True
@@ -836,7 +898,11 @@ class NFCApp(ctk.CTk):
 
     def _scan_for_checkin(self):
         """Scan for check-in (thread function)."""
+        self.operation_in_progress = True
+        self._active_operations += 1
         result = self.tag_manager.process_checkpoint_scan(self.current_station)
+        self.operation_in_progress = False
+        self._active_operations -= 1
 
         # Update UI in main thread
         self.after(0, self._checkin_complete, result)
@@ -850,9 +916,8 @@ class NFCApp(ctk.CTk):
             )
             self.update_status(f"Checked in: {result['guest_name']}", "success")
 
-            # Refresh guest list to show updated check-in status
-            if self.guest_list_visible:
-                self.refresh_guest_data()
+            # Add small delay to ensure local queue is updated before refresh
+            self.after(100, self.refresh_guest_data)
 
             # Reset after delay
             self.after(3000, lambda: self.checkpoint_status.configure(
@@ -861,7 +926,7 @@ class NFCApp(ctk.CTk):
             ))
 
         # Continue scanning after a short delay
-        if self.is_scanning and not self.is_registration_mode:
+        if self.is_scanning and (not self.is_registration_mode or self.is_checkpoint_mode):
             self.after(1000, self._checkpoint_scan_loop)
 
     def erase_tag_settings(self):
@@ -874,14 +939,14 @@ class NFCApp(ctk.CTk):
             self.settings_erase_btn.master,
             text="Cancel",
             command=self.cancel_erase_settings,
-            width=150,
-            height=35,
+            width=80,
+            height=50,
             font=self.fonts['button'],
             corner_radius=8,
             fg_color="#dc3545",
             hover_color="#c82333"
         )
-        self.erase_cancel_btn.pack(pady=5)
+        self.erase_cancel_btn.pack(side="left", padx=(10, 0))
 
         # Start countdown and operation
         self._erase_operation_active = True
@@ -944,14 +1009,14 @@ class NFCApp(ctk.CTk):
             self.tag_info_btn.master,
             text="Cancel",
             command=self.cancel_tag_info,
-            width=150,
-            height=35,
+            width=80,
+            height=50,
             font=self.fonts['button'],
             corner_radius=8,
             fg_color="#dc3545",
             hover_color="#c82333"
         )
-        self.tag_info_cancel_btn.pack(pady=5)
+        self.tag_info_cancel_btn.pack(side="left", padx=(10, 0))
 
         # Start countdown and operation
         self._tag_info_operation_active = True
@@ -1154,8 +1219,12 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
         self.current_station = station
         self.is_registration_mode = (station == "Reception")
 
+        # Reset checkpoint mode when leaving Reception
+        if station != "Reception":
+            self.is_checkpoint_mode = False
+
         # Stop scanning if leaving checkpoint mode
-        if self.is_registration_mode:
+        if self.is_registration_mode and not self.is_checkpoint_mode:
             self.is_scanning = False
 
         # Update button highlighting
@@ -1222,26 +1291,43 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
         if self.guest_list_visible:
             self._update_guest_table(self.guests_data)
 
-    def refresh_guest_data(self):
-        """Refresh guest data from Google Sheets."""
-        self.update_status("Refreshing data...", "info")
+    def on_sync_completed(self):
+        """Called when sync to Google Sheets completes successfully."""
+        # Only refresh if no active operations and not already refreshing
+        if self._active_operations == 0 and not self.is_refreshing:
+            self.logger.info("Sync completed, refreshing guest list")
+            # Schedule refresh on main thread
+            self.after(100, self._safe_background_refresh)
 
-        # Run in thread
-        thread = threading.Thread(target=self._refresh_guest_data_thread)
+    def _safe_background_refresh(self):
+        """Safely refresh guest list in background."""
+        if self.is_refreshing or self._active_operations > 0:
+            return
+
+        self.is_refreshing = True
+
+        # Run refresh in background thread
+        thread = threading.Thread(target=self._background_refresh_thread)
         thread.daemon = True
         thread.start()
 
-    def _refresh_guest_data_thread(self):
-        """Thread function for refreshing data."""
+    def _background_refresh_thread(self):
+        """Background thread for refreshing guest data."""
         try:
             guests = self.sheets_service.get_all_guests()
-            self.after(0, self._update_guest_table, guests)
+            # Update table on main thread
+            self.after(0, self._update_guest_table_silent, guests)
         except Exception as e:
-            self.after(0, self.update_status, f"Failed to refresh: {str(e)}", "error")
+            self.logger.error(f"Background refresh failed: {e}")
+        finally:
+            self.is_refreshing = False
 
-    def _update_guest_table(self, guests: List):
-        """Update the guest table with new data."""
+    def _update_guest_table_silent(self, guests: List):
+        """Update guest table without status messages (for background refresh)."""
         self.guests_data = guests
+
+        # Get all local check-ins
+        local_check_ins = self.tag_manager.get_all_local_check_ins()
 
         # Clear table
         for item in self.guest_tree.get_children():
@@ -1257,9 +1343,16 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
 
             # Add check-in status for each station
             for station in self.config['stations']:
-                check_in_time = guest.get_check_in_time(station.lower())
-                if check_in_time:
-                    values.append(f"✓ {check_in_time}")
+                # Google Sheets data takes priority (for manual edits compatibility)
+                sheets_time = guest.get_check_in_time(station.lower())
+                local_time = local_check_ins.get(guest.original_id, {}).get(station.lower())
+
+                if sheets_time:
+                    # Google Sheets has data - use it (no hourglass needed)
+                    values.append(f"✓ {sheets_time}")
+                elif local_time:
+                    # No Google Sheets data but local data exists (pending sync)
+                    values.append(f"✓ {local_time} ⏳")  # Clock emoji indicates pending
                 elif self.checkin_buttons_visible:
                     values.append("Check-in")
                 else:
@@ -1267,8 +1360,90 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
 
             item = self.guest_tree.insert("", "end", values=values)
 
+        # Re-configure hover tag after refresh
+        self.guest_tree.tag_configure("checkin_hover", background="#2196F3")
+
+        # Apply current sort
+        self._apply_current_sort()
+
+        # Update sync status
+        registry_stats = self.tag_manager.get_registry_stats()
+        if registry_stats['pending_syncs'] > 0:
+            self.sync_status_label.configure(text=f"⏳ {registry_stats['pending_syncs']} pending", text_color="#ff9800")
+        else:
+            self.sync_status_label.configure(text="✓ All synced", text_color="#4CAF50")
+
+    def refresh_guest_data(self):
+        """Refresh guest data from Google Sheets."""
+        self.update_status("Refreshing data...", "info")
+
+        # Run in thread
+        thread = threading.Thread(target=self._refresh_guest_data_thread)
+        thread.daemon = True
+        thread.start()
+
+    def _refresh_guest_data_thread(self):
+        """Thread function for refreshing data."""
+        try:
+            guests = self.sheets_service.get_all_guests()
+            # Always update table even if empty to show local data
+            self.after(0, self._update_guest_table, guests)
+        except Exception as e:
+            self.logger.error(f"Failed to fetch from Google Sheets: {e}")
+            # Still update table with existing data to show local check-ins
+            self.after(0, self._update_guest_table, self.guests_data)
+            self.after(0, self.update_status, "Using cached data (Google Sheets offline)", "warning")
+
+    def _update_guest_table(self, guests: List):
+        """Update the guest table with new data."""
+        self.guests_data = guests
+
+        # Get all local check-ins
+        local_check_ins = self.tag_manager.get_all_local_check_ins()
+
+        # Clear table
+        for item in self.guest_tree.get_children():
+            self.guest_tree.delete(item)
+
+        # Add guests
+        for i, guest in enumerate(guests):
+            values = [
+                guest.original_id,
+                guest.firstname,
+                guest.lastname
+            ]
+
+            # Add check-in status for each station
+            for station in self.config['stations']:
+                # Google Sheets data takes priority (for manual edits compatibility)
+                sheets_time = guest.get_check_in_time(station.lower())
+                local_time = local_check_ins.get(guest.original_id, {}).get(station.lower())
+
+                if sheets_time:
+                    # Google Sheets has data - use it
+                    values.append(f"✓ {sheets_time}")
+                elif local_time:
+                    # No Google Sheets data but local data exists (pending sync)
+                    values.append(f"✓ {local_time} ⏳")  # Clock emoji indicates pending
+                elif self.checkin_buttons_visible:
+                    values.append("Check-in")
+                else:
+                    values.append("-")
+
+            item = self.guest_tree.insert("", "end", values=values)
+
+        # Re-configure hover tag after refresh
+        self.guest_tree.tag_configure("checkin_hover", background="#2196F3")
+
         # Apply current sort (default to Last Name A-Z on first load)
         self._apply_current_sort()
+
+        # Update sync status
+        registry_stats = self.tag_manager.get_registry_stats()
+        if registry_stats['pending_syncs'] > 0:
+            self.sync_status_label.configure(text=f"⏳ {registry_stats['pending_syncs']} pending", text_color="#ff9800")
+        else:
+            self.sync_status_label.configure(text="✓ All synced", text_color="#4CAF50")
 
         # Only show "Loaded X guests" message at startup
         if not hasattr(self, '_initial_load_complete'):
@@ -1286,6 +1461,9 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
     def filter_guest_list(self):
         """Filter guest list based on search."""
         search_term = self.search_var.get().lower()
+
+        # Get all local check-ins
+        local_check_ins = self.tag_manager.get_all_local_check_ins()
 
         # Clear table
         for item in self.guest_tree.get_children():
@@ -1305,9 +1483,16 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
 
                 # Add check-in status for each station
                 for station in self.config['stations']:
-                    check_in_time = guest.get_check_in_time(station.lower())
-                    if check_in_time:
-                        values.append(f"✓ {check_in_time}")
+                    # Google Sheets data takes priority (for manual edits compatibility)
+                    sheets_time = guest.get_check_in_time(station.lower())
+                    local_time = local_check_ins.get(guest.original_id, {}).get(station.lower())
+
+                    if sheets_time:
+                        # Google Sheets has data - use it
+                        values.append(f"✓ {sheets_time}")
+                    elif local_time:
+                        # No Google Sheets data but local data exists (pending sync)
+                        values.append(f"✓ {local_time} ⏳")  # Clock emoji indicates pending
                     elif self.checkin_buttons_visible:
                         values.append("Check-in")
                     else:
@@ -1579,14 +1764,26 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
 
             # Only proceed if it says "Check-in"
             if len(values) > column_index and values[column_index] == "Check-in":
-                guest_id = values[0]
+                guest_id = int(values[0])  # Ensure guest_id is int
                 station = self.config['stations'][column_index - 3]
+
+                # Disable the click temporarily to prevent double-clicks
+                self.guest_tree.configure(cursor="wait")
+                self.after(1000, lambda: self.guest_tree.configure(cursor=""))
+
                 self.quick_checkin_at_station(guest_id, station)
 
     def quick_checkin_at_station(self, guest_id, station):
         """Perform quick check-in for a guest at a specific station."""
+        # Find guest name for better feedback
+        guest_name = "Unknown"
+        for guest in self.guests_data:
+            if guest.original_id == guest_id:
+                guest_name = guest.full_name
+                break
+
         # Update status
-        self.update_status(f"Checking in guest {guest_id} at {station}...", "info")
+        self.update_status(f"Checking in {guest_name} at {station}...", "info")
 
         # Run in thread
         thread = threading.Thread(target=self._quick_checkin_thread,
@@ -1597,19 +1794,19 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
     def _quick_checkin_thread(self, guest_id: int, station: str):
         """Thread function for quick check-in."""
         try:
-            # Get current time
-            timestamp = datetime.now().strftime("%H:%M")
+            # Use tag manager for manual check-in (uses local queue)
+            result = self.tag_manager.manual_check_in(guest_id, station)
 
-            # Mark attendance
-            success = self.sheets_service.mark_attendance(guest_id, station, timestamp)
-
-            if success:
-                self.after(0, self.refresh_guest_data)
-                self.after(0, self.update_status, f"✓ Checked in guest {guest_id}", "success")
+            if result:
+                # Update status first
+                self.after(0, self.update_status, f"✓ Checked in {result['guest_name']} at {station}", "success")
+                # Delay refresh to ensure queue is updated
+                self.after(200, self.refresh_guest_data)
             else:
-                self.after(0, self.update_status, f"Failed to check in guest {guest_id}", "error")
+                self.after(0, self.update_status, f"Guest ID {guest_id} not found", "error")
         except Exception as e:
-            self.after(0, self.update_status, f"Error: {str(e)}", "error")
+            self.logger.error(f"Manual check-in error: {e}")
+            self.after(0, self.update_status, f"Check-in failed: {str(e)}", "error")
 
 
 
@@ -1654,9 +1851,12 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
     def on_closing(self):
         """Handle window closing."""
         self.is_scanning = False
+        if self.tag_manager:
+            self.tag_manager.shutdown()
         if self.nfc_service:
             self.nfc_service.disconnect()
         self.destroy()
+
 
 
 def create_gui(config, nfc_service, sheets_service, tag_manager, logger):
