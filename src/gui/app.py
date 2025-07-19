@@ -23,6 +23,11 @@ ctk.set_default_color_theme("dark-blue")
 
 class NFCApp(ctk.CTk):
     """Main application window."""
+    
+    # Status message constants
+    STATUS_READY_REGISTRATION = "Ready. Waiting for registration"
+    STATUS_READY_CHECKIN = "Ready. Waiting for tap"
+    STATUS_CHECKIN_PAUSED = "Check-In Paused"
 
     def __init__(self, config: dict, nfc_service, sheets_service, tag_manager, logger):
         super().__init__()
@@ -88,6 +93,13 @@ class NFCApp(ctk.CTk):
 
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def get_ready_status_message(self):
+        """Get the appropriate ready status message based on current mode."""
+        if self.current_station == "Reception" and self.is_registration_mode and not self.is_checkpoint_mode:
+            return self.STATUS_READY_REGISTRATION
+        else:
+            return self.STATUS_READY_CHECKIN
 
     def setup_fullscreen(self):
         """Configure safe fullscreen behavior without system modifications."""
@@ -518,12 +530,7 @@ class NFCApp(ctk.CTk):
 
         # Set appropriate status based on current mode (only for non-settings modes)
         if not self.settings_visible:
-            if self.current_station == "Reception" and not self.is_checkpoint_mode:
-                self.update_status("Ready. Waiting for tag registration", "normal")
-            elif self.current_station == "Reception" and self.is_checkpoint_mode:
-                self.update_status("Ready. Waiting for Check-In", "normal")
-            else:
-                self.update_status("Ready. Waiting for Check-In", "normal")
+            self.update_status(self.get_ready_status_message(), "normal")
 
     def create_settings_content(self):
         """Create settings content in the main content area."""
@@ -533,10 +540,10 @@ class NFCApp(ctk.CTk):
             self.update_status("", "normal")
         elif self.is_checkpoint_mode or (not self.is_registration_mode):
             # Show check-in waiting text for check-in modes
-            self.update_status("Ready. Waiting for Check-In", "normal")
+            self.update_status(self.STATUS_READY_CHECKIN, "normal")
         else:
             # Default for other stations
-            self.update_status("Ready. Waiting for Check-In", "normal")
+            self.update_status(self.STATUS_READY_CHECKIN, "normal")
 
         # Main container that fills and centers content
         main_container = ctk.CTkFrame(self.content_frame, fg_color="transparent")
@@ -684,9 +691,9 @@ class NFCApp(ctk.CTk):
             self.update_mode_content()
             # Return to appropriate status
             if self.is_rewrite_mode:
-                self.update_status("Check-In Paused", "warning")
+                self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
             else:
-                self.update_status("Ready", "normal")
+                self.update_status(self.get_ready_status_message(), "normal")
         else:
             self.settings_visible = True
             # Don't stop scanning when entering settings
@@ -1126,9 +1133,9 @@ class NFCApp(ctk.CTk):
         self.guest_name_label.configure(text="")
         # Show appropriate status based on mode
         if self.is_rewrite_mode:
-            self.update_status("Check-In Paused", "warning")
+            self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
         elif not self.settings_visible:
-            self.update_status("Ready", "normal")
+            self.update_status(self.get_ready_status_message(), "normal")
 
     def toggle_reception_mode(self):
         """Toggle between Registration and Checkpoint mode at Reception."""
@@ -1487,13 +1494,10 @@ class NFCApp(ctk.CTk):
                 if self.is_checkpoint_mode or (not self.is_registration_mode):
                     self.start_checkpoint_scanning()
                     # Show appropriate status for check-in mode
-                    if self.current_station == "Reception" and self.is_checkpoint_mode:
-                        self.update_status("Ready. Waiting for Check-In", "normal")
-                    else:
-                        self.update_status("Ready. Waiting for Check-In", "normal")
+                    self.update_status(self.STATUS_READY_CHECKIN, "normal")
                 else:
                     # Registration mode - no background scanning during tag info
-                    self.update_status("Ready. Waiting for tag registration", "normal")
+                    self.update_status(self.STATUS_READY_REGISTRATION, "normal")
             else:
                 self.update_status("Guest data not found", "warning")
         else:
@@ -1797,7 +1801,7 @@ class NFCApp(ctk.CTk):
         self.is_registration_mode = False  # Ensure registration mode is off
         self.update_settings_button()
         self.update_mode_content()
-        self.update_status("Check-In Paused", "warning")
+        self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
 
 
     def on_station_button_click(self, station: str):
@@ -2104,13 +2108,9 @@ class NFCApp(ctk.CTk):
             self.update_status(f"Loaded {len(guests)} guests", "success")
             # Fade to appropriate status after 2 seconds
             if self.is_rewrite_mode:
-                self.after(2000, lambda: self.update_status("Check-In Paused", "warning"))
-            elif self.current_station == "Reception" and not self.is_checkpoint_mode:
-                self.after(2000, lambda: self.update_status_respecting_settings_mode("Ready. Waiting for tag registration", "normal"))
-            elif self.current_station == "Reception" and self.is_checkpoint_mode:
-                self.after(2000, lambda: self.update_status_respecting_settings_mode("Ready. Waiting for Check-In", "normal"))
+                self.after(2000, lambda: self.update_status(self.STATUS_CHECKIN_PAUSED, "warning"))
             else:
-                self.after(2000, lambda: self.update_status_respecting_settings_mode("Ready. Waiting for Check-In", "normal"))
+                self.after(2000, lambda: self.update_status_respecting_settings_mode(self.get_ready_status_message(), "normal"))
             self._initial_load_complete = True
         elif hasattr(self, '_is_user_initiated_refresh') and self._is_user_initiated_refresh:
             # Show confirmation if refresh was done in settings
@@ -2119,7 +2119,7 @@ class NFCApp(ctk.CTk):
             delattr(self, '_is_user_initiated_refresh')  # Clean up flag
         elif self.is_rewrite_mode:
             # In rewrite mode, go straight to paused status
-            self.update_status("Check-In Paused", "warning")
+            self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
         # No refresh messages for silent background refreshes
 
     def _handle_sync_discrepancies(self, discrepancies: List[Dict]):
@@ -2229,7 +2229,7 @@ class NFCApp(ctk.CTk):
             self.start_checkpoint_scanning()
 
         # Restore operational status
-        self.update_status("Ready", "normal")
+        self.update_status(self.get_ready_status_message(), "normal")
 
     def cancel_any_rewrite_operations(self):
         """Cancel any ongoing rewrite operations."""
@@ -2377,9 +2377,9 @@ class NFCApp(ctk.CTk):
         """Clear the rewrite form and hide success buttons."""
         self.rewrite_id_entry.delete(0, 'end')
         self.rewrite_guest_name_label.configure(text="")
-        # Only show "Ready" when not in settings mode
+        # Only show ready status when not in settings mode
         if not self.settings_visible:
-            self.update_status("Ready", "normal")
+            self.update_status(self.get_ready_status_message(), "normal")
         # Recreate the rewrite content to remove success buttons
         self.update_mode_content()
 
@@ -2521,13 +2521,9 @@ class NFCApp(ctk.CTk):
             # Set new fade timer - fade to appropriate status based on mode
             def fade_to_default():
                 if self.is_rewrite_mode:
-                    self.update_status("Check-In Paused", "warning", False)
-                elif self.current_station == "Reception" and not self.is_checkpoint_mode:
-                    self.update_status("Ready. Waiting for tag registration", "normal", False)
-                elif self.current_station == "Reception" and self.is_checkpoint_mode:
-                    self.update_status("Ready. Waiting for Check-In", "normal", False)
+                    self.update_status(self.STATUS_CHECKIN_PAUSED, "warning", False)
                 else:
-                    self.update_status("Ready. Waiting for Check-In", "normal", False)
+                    self.update_status_respecting_settings_mode(self.get_ready_status_message(), "normal")
             self._fade_timer = self.after(2000, fade_to_default)
 
     def on_sync_complete(self):
@@ -2562,7 +2558,6 @@ class NFCApp(ctk.CTk):
         if self.nfc_service:
             self.nfc_service.disconnect()
         self.destroy()
-
 
 
 def create_gui(config, nfc_service, sheets_service, tag_manager, logger):
