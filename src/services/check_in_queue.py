@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Local check-in queue for failsafe attendance tracking.
+Ensures check-ins are never lost even if Google Sheets sync fails.
+"""
+
+import json
+import logging
+from pathlib import Path
+from datetime import datetime
+from typing import Dict, List, Optional, Callable
+from threading import Lock, Thread, Event
+import time
+
+
+class CheckInQueue:
+    """Manages local check-in queue with persistent storage."""
+    
+    def __init__(self, logger: logging.Logger, queue_file: str = "config/check_in_queue.json"):
+        """
+        Initialize check-in queue.
+        
+        Args:
+            logger: Logger instance
+            queue_file: Path to persistent queue file
+        """
+        self.logger = logger
+        self.queue_file = Path(queue_file)
+        self.queue: List[Dict] = []
+        self.lock = Lock()
+        self.stop_event = Event()
+        self.sync_thread = None
+        self.sheets_service = None
+        self.sync_completion_callback: Optional[Callable[[], None]] = None
+        
+        # Local check-in cache for immediate UI updates
+        self.local_check_ins: Dict[int, Dict[str, str]] = {}
+        
+        # Load existing queue
+        self.load_queue()
+        
+    def load_queue(self) -> None:
+        """Load queue from persistent storage."""
+        if self.queue_file.exists():
+            try:
+                with open(self.queue_file, 'r') as f:
+                    data = json.load(f)
+                    self.queue = data.get('pending', [])
+                    self.local_check_ins = {
+                        int(k): v for k, v in data.get('local_check_ins', {}).items()
+                    }
+                self.logger.info(f"Loaded {len(self.queue)} pending check-ins from queue")
+            except Exception as e:
+                self.logger.error(f"Error loading queue: {e}")
+                
+    def save_queue(self) -> None:
+        """Save queue to persistent storage."""
+        try:
+            self.queue_file.parent.mkdir(exist_ok=True)
+            with open(self.queue_file, 'w') as f:
+                json.dump({
+                    'pending': self.queue,
+                    'local_check_ins': self.local_check_ins,
+                    'last_saved': datetime.now().isoformat()
+                }, f, indent=2)
+        except Exception as e:
+            self.logger.error(f"Error saving queue: {e}")
+            
+    def add_check_in(self, original_id: int, station: str, timestamp: str, guest_name: str) -> bool:
+        """
+        Add check-in to queue and local cache.
+        
+        Args:
+            original_id: Guest's original ID
+            station: Station name
+            timestamp: Check-in time
+            guest_name: Guest's full name
+            
+        Returns:
+            bool: True if added successfully
+        """
+        try:
+            with self.lock:
+                # Check if already checked in at this station
+                if original_id in self.local_check_ins and \
+                   self.local_check_ins[original_id].get(station.lower()):
+                    self.logger.warning(f"Guest {guest_name} already checked in at {station}")
+                    return True  # Still return True as it's not an error
+                
+                # Add to queue for sync
+                check_in = {
+                    'original_id': original_id,
+                    'station': station,
+                    'timestamp': timestamp,
+                    'guest_name': guest_name,
+                    'queued_at': datetime.now().isoformat(),
+                    'attempts': 0
+                }
+                self.queue.append(check_in)
+                
+                # Update local cache for immediate UI feedback
+                if original_id not in self.local_check_ins:
+                    self.local_check_ins[original_id] = {}
+                self.local_check_ins[original_id][station.lower()] = timestamp
+                
+                # Save immediately
+                self.save_queue()
+                
+                self.logger.info(f"Queued check-in: {guest_name} at {station}")
+                return True
+        except Exception as e:
+            self.logger.error(f"Error adding check-in: {e}")
+            return False
+            
+    def get_local_check_ins(self, original_id: int) -> Dict[str, str]:
+        """Get local check-in data for a guest."""
+        return self.local_check_ins.get(original_id, {})
+        
+    def get_all_local_check_ins(self) -> Dict[int, Dict[str, str]]:
+        """Get all local check-in data."""
+        with self.lock:
+            return self.local_check_ins.copy()
+            
+    def set_sheets_service(self, sheets_service) -> None:
+        """Set Google Sheets service for syncing."""
+        self.sheets_service = sheets_service
+        
+    def set_sync_completion_callback(self, callback: Callable[[], None]) -> None:
+        """Set callback to be called when sync completes successfully."""
+        self.sync_completion_callback = callback
+        
+    def start_sync(self) -> None:
+        """Start background sync thread."""
+        if not self.sync_thread or not self.sync_thread.is_alive():
+            self.stop_event.clear()
+            self.sync_thread = Thread(target=self._sync_loop, daemon=True)
+            self.sync_thread.start()
+            self.logger.info("Started check-in sync thread")
+            
+    def stop_sync(self) -> None:
+        """Stop background sync thread."""
+        self.stop_event.set()
+        if self.sync_thread and self.sync_thread.is_alive():
+            self.sync_thread.join(timeout=5)
+            self.logger.info("Stopped check-in sync thread")
+            
+    def _sync_loop(self) -> None:
+        """Background sync loop."""
+        while not self.stop_event.is_set():
+            try:
+                # Process queue every 5 seconds
+                self._process_queue()
+                self.stop_event.wait(5)
+            except Exception as e:
+                self.logger.error(f"Error in sync loop: {e}")
+                self.stop_event.wait(10)  # Wait longer on error
+                
+    def _process_queue(self) -> None:
+        """Process pending check-ins in queue."""
+        if not self.sheets_service or not self.queue:
+            return
+            
+        with self.lock:
+            # Process a copy to avoid holding lock during API calls
+            pending = self.queue.copy()
+            
+        successful = []
+        retry_delay = 60  # Retry failed items after 1 minute
+        any_synced = False
+        
+        for i, check_in in enumerate(pending):
+            # Skip if recently failed
+            if check_in['attempts'] > 0:
+                last_attempt = datetime.fromisoformat(check_in.get('last_attempt', check_in['queued_at']))
+                if (datetime.now() - last_attempt).seconds < retry_delay:
+                    continue
+                    
+            try:
+                # Check if Google Sheets already has data (manual edit)
+                guest = self.sheets_service.find_guest_by_id(check_in['original_id'])
+                if guest and guest.get_check_in_time(check_in['station'].lower()):
+                    # Google Sheets already has data - remove from queue
+                    successful.append(i)
+                    self.logger.info(f"Skipping sync for {check_in['guest_name']} at {check_in['station']} - already in Google Sheets")
+                    continue
+                
+                # Attempt to sync with Google Sheets
+                success = self.sheets_service.mark_attendance(
+                    check_in['original_id'],
+                    check_in['station'],
+                    check_in['timestamp']
+                )
+                
+                if success:
+                    successful.append(i)
+                    self.logger.info(f"Synced check-in: {check_in['guest_name']} at {check_in['station']}")
+                    any_synced = True
+                else:
+                    check_in['attempts'] += 1
+                    check_in['last_attempt'] = datetime.now().isoformat()
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to sync check-in: {e}")
+                check_in['attempts'] += 1
+                check_in['last_attempt'] = datetime.now().isoformat()
+                
+        # Remove successful items from queue
+        if successful:
+            with self.lock:
+                # Remove in reverse order to maintain indices
+                for i in sorted(successful, reverse=True):
+                    if i < len(self.queue):
+                        self.queue.pop(i)
+                self.save_queue()
+                
+        # Call sync completion callback if any items were synced
+        if any_synced and self.sync_completion_callback:
+            try:
+                self.sync_completion_callback()
+            except Exception as e:
+                self.logger.error(f"Error in sync completion callback: {e}")
+                
+    def force_sync(self) -> int:
+        """Force immediate sync of all pending items."""
+        self._process_queue()
+        return len(self.queue)
+        
+    def get_queue_status(self) -> Dict[str, int]:
+        """Get current queue status."""
+        with self.lock:
+            return {
+                'pending': len(self.queue),
+                'failed': sum(1 for item in self.queue if item['attempts'] > 0),
+                'total_local_check_ins': sum(len(stations) for stations in self.local_check_ins.values())
+            }

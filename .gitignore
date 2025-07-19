@@ -39,6 +39,7 @@ config/credentials.json
 config/token.json
 config/token.pickle
 config/tag_registry.json
+config/check_in_queue.json
 
 # OS files
 .DS_Store
