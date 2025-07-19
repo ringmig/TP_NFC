@@ -447,7 +447,7 @@ class TagManager:
             'action': 'rewrite'
         }
 
-    def clear_tag(self, tag_uid: str) -> bool:
+    def clear_tag(self, tag_uid: str) -> Optional[Dict[str, any]]:
         """
         Clear a tag registration.
 
@@ -455,19 +455,31 @@ class TagManager:
             tag_uid: Tag UID to clear
 
         Returns:
-            bool: True if cleared successfully
+            Dict with guest info if cleared successfully, None if tag not found
         """
         self.logger.debug(f"Attempting to clear tag {tag_uid}")
         self.logger.debug(f"Current registry has {len(self.tag_registry)} tags: {list(self.tag_registry.keys())}")
 
         if tag_uid in self.tag_registry:
+            # Get guest info before clearing
+            original_id = self.tag_registry[tag_uid]
+            guest = self.sheets_service.find_guest_by_id(original_id)
+
+            # Clear the tag from registry
             del self.tag_registry[tag_uid]
             self.save_registry()
             self.logger.info(f"Cleared registration for tag {tag_uid}")
-            return True
+
+            # Return guest info
+            return {
+                'tag_uid': tag_uid,
+                'original_id': original_id,
+                'guest_name': guest.full_name if guest else f"Guest ID {original_id}",
+                'cleared_at': datetime.now().isoformat()
+            }
         else:
             self.logger.warning(f"Tag {tag_uid} not found in registry for clearing")
-            return False
+            return None
 
     def get_registry_stats(self) -> Dict[str, int]:
         """Get statistics about the tag registry."""
