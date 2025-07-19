@@ -71,7 +71,7 @@ def main():
         app = create_gui(config, nfc_service, sheets_service, tag_manager, logger)
 
         # Set sync completion callback after GUI is created
-        tag_manager.set_sync_completion_callback(app.on_sync_completed)
+        tag_manager.set_sync_completion_callback(app.on_sync_complete)
 
         # Run the GUI main loop
         app.mainloop()

@@ -498,8 +498,9 @@ class NFCApp(ctk.CTk):
         self.is_displaying_tag_info = False
         self.tag_info_data = None
 
-        # Always return to main view (not settings)
+        # Always return to main view (not settings or rewrite)
         self.settings_visible = False
+        self.is_rewrite_mode = False  # Reset rewrite mode
         if hasattr(self, '_came_from_settings'):
             delattr(self, '_came_from_settings')
 
@@ -514,9 +515,7 @@ class NFCApp(ctk.CTk):
             self.start_checkpoint_scanning()
 
         # Set appropriate status based on current mode
-        if self.is_rewrite_mode:
-            self.update_status("Check-In Paused", "warning")
-        elif self.current_station == "Reception" and not self.is_checkpoint_mode:
+        if self.current_station == "Reception" and not self.is_checkpoint_mode:
             self.update_status("Ready. Waiting for tag registration", "normal")
         elif self.current_station == "Reception" and self.is_checkpoint_mode:
             self.update_status("Ready. Waiting for Check-In", "normal")
@@ -687,15 +686,21 @@ class NFCApp(ctk.CTk):
                 self.update_status("Ready", "normal")
         else:
             self.settings_visible = True
-            # Show Ready in settings since check-in functionality still works
-            self.update_status("Ready", "normal")
+            # Don't stop scanning when entering settings
+            # Show appropriate status in settings
+            if self.current_station == "Reception" and self.is_registration_mode and not self.is_checkpoint_mode:
+                self.update_status("Ready. Waiting for tag registration", "normal")
+            elif self.is_checkpoint_mode or (not self.is_registration_mode):
+                self.update_status("Ready. Waiting for Check-In", "normal")
+            else:
+                self.update_status("Ready. Waiting for Check-In", "normal")
             self.update_mode_content()
         self.update_settings_button()
 
     def update_settings_button(self):
         """Update settings button appearance based on state."""
-        if self.is_displaying_tag_info:
-            # Hide hamburger button completely when in tag info view
+        if self.is_displaying_tag_info or self.is_rewrite_mode:
+            # Hide hamburger button completely when in tag info view or rewrite mode
             self.settings_btn.pack_forget()
         elif self.settings_visible:
             self.settings_btn.pack(side="right", padx=20)
@@ -725,6 +730,7 @@ class NFCApp(ctk.CTk):
                 self.guest_list_visible = False
             # Hide buttons when in settings
             self.manual_checkin_btn.pack_forget()
+            self.reception_mode_btn.pack_forget()  # Hide reception mode button in settings
             # Expand content frame to cover most of screen (leave space for status bar)
             self.content_frame.configure(height=600)
             self.create_settings_content()
@@ -880,23 +886,41 @@ class NFCApp(ctk.CTk):
 
         # Tag is registered - show info
         original_id = self.tag_manager.tag_registry[tag.uid]
+        # Get fresh data from Google Sheets
         guest = self.sheets_service.find_guest_by_id(original_id)
 
         if guest:
-            # Check reception check-in status
-            reception_checkin = guest.is_checked_in_at('reception')
-            local_checkin = self.tag_manager.check_in_queue.has_check_in(original_id, 'Reception')
+            # Priority: Check both local data and Google Sheets
+            station_lower = self.current_station.lower()
 
-            if reception_checkin or local_checkin:
-                status_msg = f"{guest.firstname} {guest.lastname} - Already checked in"
+            # Get all check-in data
+            local_check_ins = self.tag_manager.get_all_local_check_ins()
+            guest_local_data = local_check_ins.get(original_id, {})
+
+            # Check local data
+            local_time = guest_local_data.get(station_lower)
+
+            # Check Google Sheets data (already fetched fresh from find_guest_by_id)
+            sheets_time = guest.get_check_in_time(station_lower)
+
+            # Use whichever has data (Google Sheets takes precedence)
+            checkin_time = sheets_time or local_time
+
+            self.logger.debug(f"Check-in status for {original_id} at {station_lower}: Sheets={sheets_time}, Local={local_time}")
+
+            if checkin_time:
+                status_msg = f"{guest.firstname} {guest.lastname} already checked in at {self.current_station} at {checkin_time}"
+                status_type = "warning"
             else:
                 status_msg = f"{guest.firstname} {guest.lastname} - Registered but not checked in"
+                status_type = "success"
         else:
             status_msg = f"Tag registered to ID {original_id}"
+            status_type = "success"
 
         self.operation_in_progress = False
         self._active_operations -= 1
-        self.after(0, self.update_status, status_msg, "success")
+        self.after(0, self.update_status, status_msg, status_type)
         self.after(3000, self._restart_registration_scanning)
 
     def _restart_registration_scanning(self):
@@ -1172,22 +1196,33 @@ class NFCApp(ctk.CTk):
         # Get guest info and check for duplicates
         guest = self.sheets_service.find_guest_by_id(original_id)
         if guest:
-            # Check both Google Sheets and local queue
-            sheets_checkin = guest.is_checked_in_at(self.current_station.lower())
-            local_checkin = self.tag_manager.check_in_queue.has_check_in(original_id, self.current_station)
+            try:
+                # Check both Google Sheets and local queue with error handling (consistent lowercase)
+                sheets_checkin = guest.is_checked_in_at(self.current_station.lower())
+                local_checkin = self.tag_manager.check_in_queue.has_check_in(original_id, self.current_station.lower())
 
-            if sheets_checkin or local_checkin:
-                self.operation_in_progress = False
-                self._active_operations -= 1
-                self.after(0, self.update_status, f"{guest.firstname} {guest.lastname} already checked in at {self.current_station}", "warning")
-                # Continue scanning after showing duplicate warning
-                self.after(2000, self._restart_scanning_after_duplicate)
-                return
+                if sheets_checkin or local_checkin:
+                    self.operation_in_progress = False
+                    self._active_operations -= 1
+                    guest_name = getattr(guest, 'firstname', 'Unknown') + ' ' + getattr(guest, 'lastname', '')
+                    self.after(0, self.update_status, f"{guest_name.strip()} already checked in at {self.current_station}", "warning")
+                    # Continue scanning after showing duplicate warning
+                    self.after(2000, self._restart_scanning_after_duplicate)
+                    return
+            except Exception as e:
+                self.logger.error(f"Error checking duplicate status: {e}")
+                # Continue with check-in if duplicate check fails
 
         # Process normal check-in
         result = self.tag_manager.process_checkpoint_scan_with_tag(tag, self.current_station)
         self.operation_in_progress = False
         self._active_operations -= 1
+
+        # If result is None (duplicate), it's already been handled
+        if result is None:
+            # Continue scanning after showing duplicate
+            self.after(2000, self._restart_scanning_after_duplicate)
+            return
 
         # Update UI in main thread
         self.after(0, self._checkin_complete, result)
@@ -1229,8 +1264,8 @@ class NFCApp(ctk.CTk):
             )
             self.update_status(f"Checked in: {result['guest_name']}", "success")
 
-            # Add delay to ensure status visible before refresh
-            self.after(2500, lambda: self.refresh_guest_data(False))
+            # Delay refresh to ensure status is visible and sync has time to complete
+            self.after(3000, lambda: self.refresh_guest_data(False))
 
             # Reset after delay
             self.after(3000, lambda: self.checkpoint_status.configure(
@@ -1842,13 +1877,12 @@ class NFCApp(ctk.CTk):
         if self.guest_list_visible:
             self._update_guest_table(self.guests_data)
 
-    def on_sync_completed(self):
-        """Called when sync to Google Sheets completes successfully."""
-        # Only refresh if no active operations and not already refreshing
-        if self._active_operations == 0 and not self.is_refreshing:
-            self.logger.info("Sync completed, refreshing guest list")
-            # Schedule refresh on main thread
-            self.after(100, self._safe_background_refresh)
+    def on_sync_complete(self):
+        """Called when background sync completes - refresh UI."""
+        # Always refresh after sync completes to show updated data
+        self.logger.info("Sync completed, refreshing guest list")
+        # Schedule refresh on main thread with slight delay to ensure data is ready
+        self.after(500, lambda: self.refresh_guest_data(user_initiated=False))
 
     def _safe_background_refresh(self):
         """Safely refresh guest list in background."""
@@ -1924,10 +1958,13 @@ class NFCApp(ctk.CTk):
         else:
             self.sync_status_label.configure(text="✓ All synced", text_color="#4CAF50")
 
-    def refresh_guest_data(self, show_confirmation=True):
+    def refresh_guest_data(self, user_initiated=True):
         """Refresh guest data from Google Sheets."""
-        self.update_status("Refreshing data...", "info")
-        self._is_user_initiated_refresh = show_confirmation
+        # Show status message only for user-initiated refreshes
+        if user_initiated:
+            self.update_status("Refreshing data...", "info")
+
+        self._is_user_initiated_refresh = user_initiated
 
         # Run in thread
         thread = threading.Thread(target=self._refresh_guest_data_thread)
@@ -1955,9 +1992,16 @@ class NFCApp(ctk.CTk):
         # Get all local check-ins
         local_check_ins = self.tag_manager.get_all_local_check_ins()
 
+        # Get sync status to determine if we should show hourglasses
+        registry_stats = self.tag_manager.get_registry_stats()
+        sync_complete = registry_stats['pending_syncs'] == 0
+
         # Clear table
         for item in self.guest_tree.get_children():
             self.guest_tree.delete(item)
+
+        # Track discrepancies for re-sync
+        discrepancies = []
 
         # Add guests
         for i, guest in enumerate(guests):
@@ -1974,11 +2018,21 @@ class NFCApp(ctk.CTk):
                 local_time = local_check_ins.get(guest.original_id, {}).get(station.lower())
 
                 if sheets_time:
-                    # Google Sheets has data - use it
+                    # Google Sheets has data - use it (no hourglass needed)
                     values.append(f"✓ {sheets_time}")
                 elif local_time:
-                    # No Google Sheets data but local data exists (pending sync)
-                    values.append(f"✓ {local_time} ⏳")  # Clock emoji indicates pending
+                    if sync_complete:
+                        # If sync shows complete but Google Sheets is missing data, re-sync this item
+                        discrepancies.append({
+                            'guest_id': guest.original_id,
+                            'station': station.lower(),
+                            'timestamp': local_time
+                        })
+                        # Show without hourglass since sync claims to be complete
+                        values.append(f"✓ {local_time}")
+                    else:
+                        # Sync still pending - show hourglass
+                        values.append(f"✓ {local_time} ⏳")  # Clock emoji indicates pending
                 elif self.checkin_buttons_visible:
                     values.append("Check-in")
                 else:
@@ -1986,14 +2040,18 @@ class NFCApp(ctk.CTk):
 
             item = self.guest_tree.insert("", "end", values=values)
 
+        # Handle discrepancies - re-sync items that should be synced but aren't
+        if discrepancies:
+            self.logger.warning(f"Found {len(discrepancies)} sync discrepancies, re-syncing...")
+            self._handle_sync_discrepancies(discrepancies)
+
         # Re-configure hover tag after refresh
         self.guest_tree.tag_configure("checkin_hover", background="#2196F3")
 
         # Apply current sort (default to Last Name A-Z on first load)
         self._apply_current_sort()
 
-        # Update sync status
-        registry_stats = self.tag_manager.get_registry_stats()
+        # Update sync status display
         if registry_stats['pending_syncs'] > 0:
             self.sync_status_label.configure(text=f"⏳ {registry_stats['pending_syncs']} pending", text_color="#ff9800")
 
@@ -2025,6 +2083,32 @@ class NFCApp(ctk.CTk):
             # In rewrite mode, go straight to paused status
             self.update_status("Check-In Paused", "warning")
         # No refresh messages for silent background refreshes
+
+    def _handle_sync_discrepancies(self, discrepancies: List[Dict]):
+        """Handle sync discrepancies by re-syncing missing data to Google Sheets."""
+        def _resync_thread():
+            for item in discrepancies:
+                try:
+                    # Force sync this specific item to Google Sheets
+                    success = self.tag_manager.force_sync_item(
+                        item['guest_id'],
+                        item['station'],
+                        item['timestamp']
+                    )
+                    if success:
+                        self.logger.info(f"Re-synced {item['guest_id']} at {item['station']}")
+                    else:
+                        self.logger.warning(f"Failed to re-sync {item['guest_id']} at {item['station']}")
+                except Exception as e:
+                    self.logger.error(f"Error re-syncing discrepancy: {e}")
+
+            # Refresh after re-sync attempts
+            self.after(1000, lambda: self.refresh_guest_data(user_initiated=False))
+
+        # Run re-sync in background thread
+        thread = threading.Thread(target=_resync_thread)
+        thread.daemon = True
+        thread.start()
 
     def filter_guest_list(self):
         """Filter guest list based on search."""
@@ -2409,10 +2493,7 @@ class NFCApp(ctk.CTk):
     def on_sync_complete(self):
         """Called when background sync completes - silently update UI."""
         # Refresh guest data silently (no status messages)
-        thread = threading.Thread(target=self._refresh_guest_data_thread)
-        thread.daemon = True
-        self._is_user_initiated_refresh = False  # Silent refresh
-        thread.start()
+        self.refresh_guest_data(user_initiated=False)
 
     def _force_sync_on_startup(self):
         """Force sync of pending items on startup."""

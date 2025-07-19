@@ -86,7 +86,7 @@ class CheckInQueue:
                 if original_id in self.local_check_ins and \
                    self.local_check_ins[original_id].get(station.lower()):
                     self.logger.warning(f"Guest {guest_name} already checked in at {station}")
-                    return True  # Still return True as it's not an error
+                    return False  # Don't add duplicate
 
                 # Add to queue for sync
                 check_in = {
@@ -99,9 +99,10 @@ class CheckInQueue:
                 }
                 self.queue.append(check_in)
 
-                # Update local cache for immediate UI feedback
+                # Update local cache for immediate UI feedback - always use lowercase
                 if original_id not in self.local_check_ins:
                     self.local_check_ins[original_id] = {}
+                # Store with lowercase key
                 self.local_check_ins[original_id][station.lower()] = timestamp
 
                 # Save immediately
@@ -181,11 +182,11 @@ class CheckInQueue:
             pending = self.queue.copy()
 
         successful = []
-        retry_delay = 60  # Retry failed items after 1 minute
+        retry_delay = 30  # Reduced retry delay from 60 to 30 seconds
         any_synced = False
 
         for i, check_in in enumerate(pending):
-            # Skip if recently failed
+            # Skip if recently failed (but reduce wait time)
             if check_in['attempts'] > 0:
                 last_attempt = datetime.fromisoformat(check_in.get('last_attempt', check_in['queued_at']))
                 if (datetime.now() - last_attempt).seconds < retry_delay:
@@ -195,9 +196,19 @@ class CheckInQueue:
                 # Check if Google Sheets already has data (manual edit)
                 guest = self.sheets_service.find_guest_by_id(check_in['original_id'])
                 if guest and guest.get_check_in_time(check_in['station'].lower()):
-                    # Google Sheets already has data - remove from queue
+                    # Google Sheets already has data - remove from queue and local cache
                     successful.append(i)
                     self.logger.info(f"Skipping sync for {check_in['guest_name']} at {check_in['station']} - already in Google Sheets")
+
+                    # Remove from local cache since it's already in Google Sheets
+                    with self.lock:
+                        if check_in['original_id'] in self.local_check_ins:
+                            station_key = check_in['station'].lower()
+                            if station_key in self.local_check_ins[check_in['original_id']]:
+                                del self.local_check_ins[check_in['original_id']][station_key]
+                                # Remove guest entry if no more stations
+                                if not self.local_check_ins[check_in['original_id']]:
+                                    del self.local_check_ins[check_in['original_id']]
                     continue
 
                 # Attempt to sync with Google Sheets
@@ -211,21 +222,25 @@ class CheckInQueue:
                     successful.append(i)
                     self.logger.info(f"Synced check-in: {check_in['guest_name']} at {check_in['station']}")
                     any_synced = True
-
-                    # Remove from local cache since it's now in Google Sheets
-                    with self.lock:
-                        if check_in['original_id'] in self.local_check_ins:
-                            station_key = check_in['station'].lower()
-                            if station_key in self.local_check_ins[check_in['original_id']]:
-                                del self.local_check_ins[check_in['original_id']][station_key]
-                                # Remove guest entry if no more stations
-                                if not self.local_check_ins[check_in['original_id']]:
-                                    del self.local_check_ins[check_in['original_id']]
-                                # Save the updated cache
-                                self.save_queue()
                 else:
-                    check_in['attempts'] += 1
-                    check_in['last_attempt'] = datetime.now().isoformat()
+                    # Check if Google Sheets already has ANY data for this check-in (even different timestamp)
+                    existing_guest = self.sheets_service.find_guest_by_id(check_in['original_id'])
+                    if existing_guest and existing_guest.get_check_in_time(check_in['station'].lower()):
+                        # Google Sheets has different data - accept Google Sheets as truth
+                        sheets_time = existing_guest.get_check_in_time(check_in['station'].lower())
+                        self.logger.warning(f"Sync conflict: {check_in['guest_name']} at {check_in['station']} - "
+                                          f"Local: {check_in['timestamp']}, Sheets: {sheets_time} - "
+                                          f"Keeping Google Sheets data")
+                        successful.append(i)
+                        # DON'T remove from local cache here - do it after processing all items
+                    else:
+                        # Real failure - increment attempts
+                        check_in['attempts'] += 1
+                        check_in['last_attempt'] = datetime.now().isoformat()
+                        # Force retry after max 3 attempts
+                        if check_in['attempts'] >= 3:
+                            self.logger.error(f"Max sync attempts reached for {check_in['guest_name']} at {check_in['station']}")
+                            successful.append(i)  # Remove from queue after max attempts
 
             except Exception as e:
                 self.logger.error(f"Failed to sync check-in: {e}")
@@ -238,6 +253,17 @@ class CheckInQueue:
                 # Remove in reverse order to maintain indices
                 for i in sorted(successful, reverse=True):
                     if i < len(self.queue):
+                        check_in = self.queue[i]
+
+                        # Clean up local cache for successfully synced items
+                        if check_in['original_id'] in self.local_check_ins:
+                            station_key = check_in['station'].lower()
+                            if station_key in self.local_check_ins[check_in['original_id']]:
+                                del self.local_check_ins[check_in['original_id']][station_key]
+                                # Remove guest entry if no more stations
+                                if not self.local_check_ins[check_in['original_id']]:
+                                    del self.local_check_ins[check_in['original_id']]
+
                         self.queue.pop(i)
                 self.save_queue()
 
