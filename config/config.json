@@ -27,5 +27,8 @@
         "window_width": 600,
         "window_height": 500,
         "theme": "dark-blue"
+    },
+    "developer": {
+        "password": "8888"
     }
 }

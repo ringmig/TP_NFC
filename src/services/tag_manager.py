@@ -188,6 +188,16 @@ class TagManager:
             self.logger.error(f"Guest with ID {original_id} not found")
             return None
 
+        # Check if already checked in at this station (Google Sheets + local queue)
+        # Use lowercase consistently for comparison
+        sheets_checkin = guest.is_checked_in_at(station.lower())
+        local_checkin = self.check_in_queue.has_check_in(original_id, station.lower())
+
+        if sheets_checkin or local_checkin:
+            self.logger.warning(f"Guest {guest.full_name} already checked in at {station}")
+            # Don't add to queue - return None to indicate duplicate
+            return None
+
         # Add to local queue immediately (for instant UI feedback)
         timestamp = datetime.now().strftime("%H:%M")
         self.check_in_queue.add_check_in(original_id, station, timestamp, guest.full_name)
@@ -234,16 +244,14 @@ class TagManager:
             return None
 
         # Check if already checked in at this station (Google Sheets + local queue)
+        # Use lowercase consistently for comparison
         sheets_checkin = guest.is_checked_in_at(station.lower())
-        local_checkin = self.check_in_queue.has_check_in(original_id, station)
+        local_checkin = self.check_in_queue.has_check_in(original_id, station.lower())
 
         if sheets_checkin or local_checkin:
             self.logger.warning(f"Guest {guest.full_name} already checked in at {station}")
-            return {
-                'duplicate_checkin': True,
-                'guest_name': guest.full_name,
-                'station': station
-            }
+            # Don't process further - just return duplicate status
+            return None
 
         # Add to local queue immediately (for instant UI feedback)
         timestamp = datetime.now().strftime("%H:%M")
@@ -301,10 +309,12 @@ class TagManager:
             # Include local check-ins
             local_check_ins = self.check_in_queue.get_local_check_ins(original_id)
 
-            # Merge with guest check-ins (local takes precedence)
+            # Merge with guest check-ins (Google Sheets takes precedence as source of truth)
             merged_check_ins = guest.check_ins.copy()
             for station, time in local_check_ins.items():
-                merged_check_ins[station] = time
+                # Only add local time if Google Sheets doesn't have data
+                if not merged_check_ins.get(station):
+                    merged_check_ins[station] = time
 
             return {
                 'tag_uid': tag_uid,
@@ -348,6 +358,25 @@ class TagManager:
     def force_sync(self) -> int:
         """Force immediate sync of pending check-ins."""
         return self.check_in_queue.force_sync()
+    
+    def force_sync_item(self, original_id: int, station: str, timestamp: str) -> bool:
+        """Force sync of a specific check-in item."""
+        try:
+            # Get guest info for name
+            guest = self.sheets_service.find_guest_by_id(original_id)
+            if not guest:
+                return False
+            
+            # Add to queue for immediate sync
+            self.check_in_queue.add_check_in(original_id, station, timestamp, guest.full_name)
+            
+            # Force immediate sync
+            self.check_in_queue.force_sync()
+            
+            return True
+        except Exception as e:
+            self.logger.error(f"Error forcing sync for item: {e}")
+            return False
 
     def resolve_sync_conflicts(self, all_guests) -> None:
         """Resolve conflicts between local data and Google Sheets."""

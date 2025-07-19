@@ -153,8 +153,8 @@ class GoogleSheetsService:
             GuestRecord if found, None otherwise
         """
         try:
-            # Search for the specific row
-            range_name = f"{self.sheet_name}!A:C"
+            # Get full row data including check-ins
+            range_name = f"{self.sheet_name}!A:H"
             
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.spreadsheet_id,
@@ -169,6 +169,19 @@ class GoogleSheetsService:
                     if len(row) >= 3:
                         guest = GuestRecord(int(row[0]), row[1], row[2])
                         guest.row_number = i  # Store row number for updates
+                        
+                        # Load check-in data
+                        if len(row) > 3 and row[3]:  # reception
+                            guest.check_ins['reception'] = row[3]
+                        if len(row) > 4 and row[4]:  # lio
+                            guest.check_ins['lio'] = row[4]
+                        if len(row) > 5 and row[5]:  # juntos
+                            guest.check_ins['juntos'] = row[5]
+                        if len(row) > 6 and row[6]:  # experimental
+                            guest.check_ins['experimental'] = row[6]
+                        if len(row) > 7 and row[7]:  # unvrs
+                            guest.check_ins['unvrs'] = row[7]
+                            
                         return guest
                         
             self.logger.warning(f"Guest with ID {original_id} not found")
@@ -288,4 +301,43 @@ class GoogleSheetsService:
             
         except Exception as e:
             self.logger.error(f"Error in batch update: {e}")
+            return False
+            
+    def clear_all_check_in_data(self) -> bool:
+        """Clear all check-in data from Google Sheets (columns D-H)."""
+        try:
+            # Get all rows to determine range
+            range_name = f"{self.sheet_name}!A:H"
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=range_name
+            ).execute()
+            
+            values = result.get('values', [])
+            if len(values) <= 1:  # Only header row or empty
+                self.logger.info("No check-in data to clear")
+                return True
+                
+            # Clear check-in columns (D-H) for all data rows
+            clear_range = f"{self.sheet_name}!D2:H{len(values)}"
+            
+            # Create empty values for clearing
+            clear_values = [[""] * 5 for _ in range(len(values) - 1)]  # 5 columns, all rows except header
+            
+            body = {
+                'values': clear_values
+            }
+            
+            self.service.spreadsheets().values().update(
+                spreadsheetId=self.spreadsheet_id,
+                range=clear_range,
+                valueInputOption='RAW',
+                body=body
+            ).execute()
+            
+            self.logger.warning(f"Cleared all check-in data from Google Sheets ({len(clear_values)} rows)")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error clearing Google Sheets data: {e}")
             return False

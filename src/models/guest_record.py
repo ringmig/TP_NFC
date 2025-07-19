@@ -4,7 +4,7 @@
 Guest record model for attendance tracking.
 """
 
-from typing import Optional, Dict
+from typing import Optional, Dict, Union
 from datetime import datetime
 
 
@@ -25,8 +25,8 @@ class GuestRecord:
         self.lastname = lastname
         self.full_name = f"{firstname} {lastname}"
         
-        # Station check-ins (station_name -> timestamp)
-        self.check_ins: Dict[str, Optional[datetime]] = {
+        # Station check-ins (station_name -> timestamp string or datetime)
+        self.check_ins: Dict[str, Optional[Union[str, datetime]]] = {
             'reception': None,
             'lio': None,
             'juntos': None,
@@ -60,7 +60,7 @@ class GuestRecord:
         station = station.lower()
         return station in self.check_ins and self.check_ins[station] is not None
         
-    def get_check_in_time(self, station: str) -> Optional[datetime]:
+    def get_check_in_time(self, station: str) -> Optional[Union[str, datetime]]:
         """Get check-in time for a specific station."""
         station = station.lower()
         return self.check_ins.get(station)
@@ -87,7 +87,7 @@ class GuestRecord:
             'full_name': self.full_name,
             'nfc_tag_uid': self.nfc_tag_uid,
             'check_ins': {
-                station: time.isoformat() if time else None
+                station: time.isoformat() if isinstance(time, datetime) else time
                 for station, time in self.check_ins.items()
             }
         }
