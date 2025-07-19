@@ -13,6 +13,7 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from PIL import Image
 import os
+import platform
 from pathlib import Path
 
 # Configure CustomTkinter
@@ -37,25 +38,25 @@ class NFCApp(ctk.CTk):
         self.is_registration_mode = True
         self.guest_list_visible = False
         self.checkin_buttons_visible = False  # Hidden by default
+        self.settings_visible = False  # Settings panel visibility
+        self.is_rewrite_mode = False  # Rewrite tag mode
         self.guests_data = []
         self.is_scanning = False
+
+        # Sorting state - default to Last Name A-Z
+        self.current_sort_column = "last"
+        self.current_sort_reverse = False
+
+        # Track hovered item for styling
+        self.hovered_item = None
 
         # Window setup
         self.title(config['ui']['window_title'])
         self.geometry(f"{config['ui']['window_width']}x{config['ui']['window_height']}")
         self.minsize(500, 400)
 
-        # Start in fullscreen
-        try:
-            self.state('zoomed')  # Windows fullscreen
-        except:
-            try:
-                self.attributes('-zoomed', True)  # Linux fullscreen
-            except:
-                try:
-                    self.attributes('-fullscreen', True)  # macOS fullscreen
-                except:
-                    pass  # Fallback to windowed mode
+        # Platform-specific fullscreen implementation
+        self.setup_fullscreen()
 
         # Center window (fallback if fullscreen doesn't work)
         self.update_idletasks()
@@ -73,6 +74,62 @@ class NFCApp(ctk.CTk):
 
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def setup_fullscreen(self):
+        """Configure safe fullscreen behavior without system modifications."""
+        system = platform.system()
+
+        try:
+            if system == "Darwin":  # macOS
+                # Use simple window maximization instead of true fullscreen
+                self.attributes('-zoomed', True)
+                self.logger.info("macOS window maximized")
+
+            elif system == "Windows":
+                self.state('zoomed')
+                self.logger.info("Windows window maximized")
+
+            elif system == "Linux":
+                self.attributes('-zoomed', True)
+                self.logger.info("Linux window maximized")
+
+        except Exception as e:
+            self.logger.warning(f"Window maximization failed: {e}")
+            # Fallback to manual fullscreen using screen dimensions
+            try:
+                width = self.winfo_screenwidth()
+                height = self.winfo_screenheight()
+                self.geometry(f"{width}x{height}+0+0")
+                self.logger.info("Using geometry-based fullscreen")
+            except Exception as e2:
+                self.logger.warning(f"Geometry fallback failed: {e2}")
+
+        # Add F11 to toggle maximized state
+        self.bind('<F11>', self.toggle_fullscreen)
+
+    def toggle_fullscreen(self, event=None):
+        """Toggle between maximized and normal window state."""
+        system = platform.system()
+
+        try:
+            if system == "Darwin":
+                # Toggle macOS maximized state
+                current_state = self.attributes('-zoomed')
+                self.attributes('-zoomed', not current_state)
+
+            elif system == "Windows":
+                if self.state() == 'zoomed':
+                    self.state('normal')
+                    self.geometry(f"{self.config['ui']['window_width']}x{self.config['ui']['window_height']}")
+                else:
+                    self.state('zoomed')
+
+            elif system == "Linux":
+                current_state = self.attributes('-zoomed')
+                self.attributes('-zoomed', not current_state)
+
+        except Exception as e:
+            self.logger.error(f"Error toggling fullscreen: {e}")
 
     def setup_styles(self):
         """Configure fonts and styles."""
@@ -93,9 +150,10 @@ class NFCApp(ctk.CTk):
         # Header frame
         self.create_header()
 
-        # Content frame (switches based on mode)
-        self.content_frame = ctk.CTkFrame(self.main_frame, corner_radius=15)
-        self.content_frame.pack(fill="both", expand=True, pady=(20, 10))
+        # Content frame (compact size)
+        self.content_frame = ctk.CTkFrame(self.main_frame, corner_radius=15, height=200)
+        self.content_frame.pack(fill="x", pady=(20, 10))
+        self.content_frame.pack_propagate(False)
 
         # Status bar
         self.create_status_bar()
@@ -103,8 +161,10 @@ class NFCApp(ctk.CTk):
         # Action buttons
         self.create_action_buttons()
 
-        # Guest list panel (initially hidden)
+        # Guest list panel (always show initially)
         self.create_guest_list_panel()
+        self.list_frame.pack(fill="both", expand=True, pady=(10, 0))
+        self.guest_list_visible = True
 
         # Initialize content based on mode
         self.update_mode_content()
@@ -119,31 +179,54 @@ class NFCApp(ctk.CTk):
         self.logo_label = ctk.CTkLabel(header_frame, text="", width=80, height=80)
         self.logo_label.pack(side="left", padx=20)
 
-        # Station selector centered
+        # Settings button on the right
+        self.settings_btn = ctk.CTkButton(
+            header_frame,
+            text="☰",
+            command=self.toggle_settings,
+            width=50,
+            height=50,
+            corner_radius=10,
+            font=CTkFont(size=20, weight="bold"),
+            fg_color="#4a4a4a",
+            hover_color="#5a5a5a"
+        )
+        self.settings_btn.pack(side="right", padx=20)
+        self.update_settings_button()
+
+        # Station buttons centered
         station_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
         station_frame.place(relx=0.5, rely=0.5, anchor="center")
 
         station_label = ctk.CTkLabel(
             station_frame,
-            text="Station:",
+            text="Current Station:",
             font=CTkFont(size=18, weight="bold")
         )
         station_label.pack(side="left", padx=(0, 15))
 
-        self.station_var = tk.StringVar(value=self.current_station)
-        self.station_dropdown = ctk.CTkComboBox(
-            station_frame,
-            values=self.config['stations'],
-            variable=self.station_var,
-            command=self.on_station_change,
-            width=200,
-            height=40,
-            font=CTkFont(size=16, weight="bold"),
-            state="readonly",
-            button_hover_color="#2563eb",
-            dropdown_hover_color="#1e40af"
-        )
-        self.station_dropdown.pack(side="left")
+        # Container for station buttons
+        buttons_container = ctk.CTkFrame(station_frame, fg_color="transparent")
+        buttons_container.pack(side="left")
+
+        # Create station buttons with enhanced styling
+        self.station_buttons = {}
+        for i, station in enumerate(self.config['stations']):
+            btn = ctk.CTkButton(
+                buttons_container,
+                text=station,
+                command=lambda s=station: self.on_station_button_click(s),
+                width=110,
+                height=50,
+                corner_radius=12,
+                font=CTkFont(size=15, weight="bold"),
+                border_width=2
+            )
+            btn.pack(side="left", padx=3)
+            self.station_buttons[station] = btn
+
+        # Highlight current station
+        self.update_station_buttons()
 
     def create_status_bar(self):
         """Create status bar."""
@@ -163,52 +246,14 @@ class NFCApp(ctk.CTk):
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         button_frame.pack(fill="x")
 
-        # Toggle guest list button on the left
-        self.toggle_list_btn = ctk.CTkButton(
-            button_frame,
-            text="Show Guest List ▼",
-            command=self.toggle_guest_list,
-            width=150,
-            height=35,
-            corner_radius=8,
-            font=self.fonts['button']
-        )
-        self.toggle_list_btn.pack(side="left", padx=5)
-
-        # Right frame for other buttons
+        # Right frame for buttons
         right_frame = ctk.CTkFrame(button_frame, fg_color="transparent")
         right_frame.pack(side="right")
-
-        # Erase tag button
-        self.erase_btn = ctk.CTkButton(
-            right_frame,
-            text="Erase Tag",
-            command=self.erase_tag,
-            width=100,
-            height=35,
-            corner_radius=8,
-            font=self.fonts['button'],
-            fg_color="#dc3545",
-            hover_color="#c82333"
-        )
-        self.erase_btn.pack(side="left", padx=5)
-
-        # Refresh button
-        self.refresh_btn = ctk.CTkButton(
-            button_frame,
-            text="Refresh",
-            command=self.refresh_guest_data,
-            width=100,
-            height=35,
-            corner_radius=8,
-            font=self.fonts['button']
-        )
-        self.refresh_btn.pack(side="left", padx=5)
 
         # Manual check-in button
         self.manual_checkin_btn = ctk.CTkButton(
             right_frame,
-            text="Manual Check-In",
+            text="Manual Check-in",
             command=self.toggle_manual_checkin,
             width=130,
             height=35,
@@ -220,7 +265,7 @@ class NFCApp(ctk.CTk):
         # Initially hidden, will show in checkpoint mode
 
     def create_guest_list_panel(self):
-        """Create collapsible guest list panel."""
+        """Create guest list panel."""
         self.list_frame = ctk.CTkFrame(self.main_frame, corner_radius=15)
         # Initially hidden
 
@@ -254,28 +299,32 @@ class NFCApp(ctk.CTk):
         scrollbar = ctk.CTkScrollbar(tree_frame)
         scrollbar.pack(side="right", fill="y")
 
-        # Treeview
+        # Overview mode: show all stations
+        columns = ("id", "first", "last") + tuple(station.lower() for station in self.config['stations'])
+
+        # Treeview with flexible height
         self.guest_tree = ttk.Treeview(
             tree_frame,
-            columns=("id", "first", "last", "status", "action"),
+            columns=columns,
             show="headings",
-            yscrollcommand=scrollbar.set,
-            height=8
+            yscrollcommand=scrollbar.set
         )
         scrollbar.configure(command=self.guest_tree.yview)
 
-        # Configure columns
+        # Configure column headers and widths
         self.guest_tree.heading("id", text="Guest ID", anchor="w")
         self.guest_tree.heading("first", text="First Name", anchor="w")
         self.guest_tree.heading("last", text="Last Name", anchor="w")
-        self.guest_tree.heading("status", text="Check-In Time", anchor="w")
-        self.guest_tree.heading("action", text="", anchor="w")
 
-        self.guest_tree.column("id", width=60, anchor="w")  # Left align
-        self.guest_tree.column("first", width=120, anchor="w")
-        self.guest_tree.column("last", width=120, anchor="w")
-        self.guest_tree.column("status", width=100, anchor="w")
-        self.guest_tree.column("action", width=120, anchor="e")  # Right align
+        # Set responsive column widths
+        self.guest_tree.column("id", width=80, minwidth=60, anchor="w")
+        self.guest_tree.column("first", width=150, minwidth=100, anchor="w")
+        self.guest_tree.column("last", width=150, minwidth=100, anchor="w")
+
+        # Set headers and widths for all stations with responsive sizing
+        for i, station in enumerate(self.config['stations']):
+            self.guest_tree.heading(station.lower(), text=station, anchor="w")
+            self.guest_tree.column(station.lower(), width=120, minwidth=80, anchor="w")
 
         # Style for treeview
         style = ttk.Style()
@@ -286,7 +335,8 @@ class NFCApp(ctk.CTk):
                        background="#212121",
                        foreground="white",
                        fieldbackground="#212121",
-                       borderwidth=0)
+                       borderwidth=0,
+                       rowheight=25)
         style.configure("Treeview.Heading",
                        background="#323232",
                        foreground="white",
@@ -307,7 +357,8 @@ class NFCApp(ctk.CTk):
         self.guest_tree.bind("<Motion>", self.on_tree_motion)
 
         # Bind column headers for sorting
-        for col in ("id", "first", "last", "status"):
+        sortable_columns = ["id", "first", "last"]
+        for col in sortable_columns:
             self.guest_tree.heading(col, command=lambda c=col: self.sort_treeview(c))
 
         self.guest_tree.pack(fill="both", expand=True)
@@ -315,23 +366,167 @@ class NFCApp(ctk.CTk):
         # Sorting state
         self.sort_reverse = {}
 
+        # Configure hover tag for check-in buttons
+        self.guest_tree.tag_configure("checkin_hover", background="#ff9800", foreground="white")
+
+    def create_settings_content(self):
+        """Create settings content in the main content area."""
+        # Main container that fills and centers content
+        main_container = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        main_container.pack(fill="both", expand=True)
+
+        # Center frame for all content
+        center_frame = ctk.CTkFrame(main_container, fg_color="transparent")
+        center_frame.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Settings title
+        settings_title = ctk.CTkLabel(
+            center_frame,
+            text="Tools",
+            font=self.fonts['heading']
+        )
+        settings_title.pack(pady=(0, 30))
+
+        # Buttons container
+        buttons_container = ctk.CTkFrame(center_frame, fg_color="transparent")
+        buttons_container.pack()
+
+        # Refresh Guest List button
+        self.refresh_btn = ctk.CTkButton(
+            buttons_container,
+            text="Refresh Guest List",
+            command=self.refresh_guest_data,
+            width=200,
+            height=50,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#4CAF50",
+            hover_color="#45a049"
+        )
+        self.refresh_btn.pack(pady=10)
+
+        # Erase Tag button
+        self.settings_erase_btn = ctk.CTkButton(
+            buttons_container,
+            text="Erase Tag",
+            command=self.erase_tag_settings,
+            width=200,
+            height=50,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#dc3545",
+            hover_color="#c82333"
+        )
+        self.settings_erase_btn.pack(pady=10)
+
+        # Tag Info button
+        self.tag_info_btn = ctk.CTkButton(
+            buttons_container,
+            text="Tag Info",
+            command=self.tag_info,
+            width=200,
+            height=50,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#2196F3",
+            hover_color="#1976D2"
+        )
+        self.tag_info_btn.pack(pady=10)
+
+        # Rewrite Tag button
+        self.rewrite_tag_btn = ctk.CTkButton(
+            buttons_container,
+            text="Rewrite Tag",
+            command=self.rewrite_tag,
+            width=200,
+            height=50,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#ff9800",
+            hover_color="#f57c00"
+        )
+        self.rewrite_tag_btn.pack(pady=10)
+
+        # Log button
+        self.log_btn = ctk.CTkButton(
+            buttons_container,
+            text="View Logs",
+            command=self.show_logs,
+            width=200,
+            height=50,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#9c27b0",
+            hover_color="#7b1fa2"
+        )
+        self.log_btn.pack(pady=10)
+
     def sort_treeview(self, col):
         """Sort treeview by column."""
+        # Determine sort direction
+        if self.current_sort_column == col:
+            # Same column clicked - toggle direction
+            self.current_sort_reverse = not self.current_sort_reverse
+        else:
+            # New column clicked - start with ascending
+            self.current_sort_column = col
+            self.current_sort_reverse = False
+
+        # Apply the sort
+        self._apply_current_sort()
+
+        # Update old sort_reverse dict for compatibility
+        self.sort_reverse[col] = self.current_sort_reverse
+
+    def _apply_current_sort(self):
+        """Apply the current sort column and direction to the treeview."""
+        if not self.current_sort_column:
+            return
+
         # Get all items
-        items = [(self.guest_tree.set(k, col), k) for k in self.guest_tree.get_children('')]
+        items = [(self.guest_tree.set(k, self.current_sort_column), k) for k in self.guest_tree.get_children('')]
 
         # Check if we need numeric sort for ID column
-        if col == "id":
-            items.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 0, reverse=self.sort_reverse.get(col, False))
+        if self.current_sort_column == "id":
+            items.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 0, reverse=self.current_sort_reverse)
         else:
-            items.sort(reverse=self.sort_reverse.get(col, False))
+            items.sort(reverse=self.current_sort_reverse)
 
         # Rearrange items
         for index, (val, k) in enumerate(items):
             self.guest_tree.move(k, '', index)
 
-        # Toggle sort direction for next click
-        self.sort_reverse[col] = not self.sort_reverse.get(col, False)
+    def toggle_settings(self):
+        """Toggle settings panel visibility."""
+        if self.settings_visible:
+            self.settings_visible = False
+            self.update_mode_content()
+            # Return to appropriate status
+            if self.is_rewrite_mode:
+                self.update_status("Check-In Paused", "warning")
+            else:
+                self.update_status("Ready", "normal")
+        else:
+            self.settings_visible = True
+            # Show Ready in settings since check-in functionality still works
+            self.update_status("Ready", "normal")
+            self.update_mode_content()
+        self.update_settings_button()
+
+    def update_settings_button(self):
+        """Update settings button appearance based on state."""
+        if self.settings_visible:
+            self.settings_btn.configure(
+                text="✕",
+                fg_color="#dc3545",
+                hover_color="#c82333"
+            )
+        else:
+            self.settings_btn.configure(
+                text="☰",
+                fg_color="#4a4a4a",
+                hover_color="#5a5a5a"
+            )
 
     def update_mode_content(self):
         """Update content based on current mode."""
@@ -339,11 +534,33 @@ class NFCApp(ctk.CTk):
         for widget in self.content_frame.winfo_children():
             widget.destroy()
 
-        # Update button visibility - always show manual check-in button
-        self.manual_checkin_btn.pack(side="left", padx=5)
+        if self.settings_visible:
+            # Hide guest list completely in settings
+            if self.guest_list_visible:
+                self.list_frame.pack_forget()
+                self.guest_list_visible = False
+            # Hide buttons when in settings
+            self.manual_checkin_btn.pack_forget()
+            # Expand content frame to cover most of screen (leave space for status bar)
+            self.content_frame.configure(height=600)
+            self.create_settings_content()
+            return
+        else:
+            # Restore compact content frame
+            self.content_frame.configure(height=200)
+            # Show guest list if not visible
+            if not self.guest_list_visible:
+                self.list_frame.pack(fill="both", expand=True, pady=(10, 0))
+                self.guest_list_visible = True
+            # Show buttons when not in settings
+            self.manual_checkin_btn.pack(side="left", padx=5)
+
+        # Update button visibility
         self.manual_checkin_btn.configure(text="Manual Check-in")
 
-        if self.is_registration_mode:
+        if self.is_rewrite_mode:
+            self.create_rewrite_content()
+        elif self.is_registration_mode:
             self.create_registration_content()
         else:
             # Checkpoint mode
@@ -401,6 +618,75 @@ class NFCApp(ctk.CTk):
 
         # Focus on entry
         self.id_entry.focus()
+
+    def create_rewrite_content(self):
+        """Create rewrite mode UI (similar to registration)."""
+        # Center container
+        center_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        center_frame.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Instructions
+        instruction_label = ctk.CTkLabel(
+            center_frame,
+            text="Enter Guest ID:",
+            font=self.fonts['heading']
+        )
+        instruction_label.pack(pady=(0, 20))
+
+        # ID entry frame
+        entry_frame = ctk.CTkFrame(center_frame, fg_color="transparent")
+        entry_frame.pack()
+
+        # ID entry
+        self.rewrite_id_entry = ctk.CTkEntry(
+            entry_frame,
+            width=200,
+            height=50,
+            font=CTkFont(size=20),
+            placeholder_text="Guest ID"
+        )
+        self.rewrite_id_entry.pack(side="left", padx=(0, 10))
+        self.rewrite_id_entry.bind("<Return>", lambda e: self.rewrite_to_band())
+
+        # Rewrite button
+        self.rewrite_btn = ctk.CTkButton(
+            entry_frame,
+            text="Rewrite Tag",
+            command=self.rewrite_to_band,
+            width=120,
+            height=50,
+            font=self.fonts['button'],
+            corner_radius=8,
+            fg_color="#ff9800",
+            hover_color="#f57c00"
+        )
+        self.rewrite_btn.pack(side="left")
+
+        # Exit rewrite button (red X)
+        self.exit_rewrite_btn = ctk.CTkButton(
+            entry_frame,
+            text="✕",
+            command=self.exit_rewrite_mode,
+            width=50,
+            height=50,
+            corner_radius=8,
+            font=CTkFont(size=20, weight="bold"),
+            fg_color="#dc3545",
+            hover_color="#c82333"
+        )
+        self.exit_rewrite_btn.pack(side="left", padx=(10, 0))
+
+        # Guest name display (initially hidden)
+        self.rewrite_guest_name_label = ctk.CTkLabel(
+            center_frame,
+            text="",
+            font=self.fonts['heading'],
+            text_color="#4CAF50"
+        )
+        self.rewrite_guest_name_label.pack(pady=(20, 0))
+
+        # Focus on entry
+        self.rewrite_id_entry.focus()
 
     def create_checkpoint_content(self):
         """Create checkpoint mode UI."""
@@ -528,7 +814,11 @@ class NFCApp(ctk.CTk):
         """Clear the registration form."""
         self.id_entry.delete(0, 'end')
         self.guest_name_label.configure(text="")
-        self.update_status("Ready", "normal")
+        # Show appropriate status based on mode
+        if self.is_rewrite_mode:
+            self.update_status("Check-In Paused", "warning")
+        elif not self.settings_visible:
+            self.update_status("Ready", "normal")
 
     def start_checkpoint_scanning(self):
         """Start continuous scanning for checkpoint mode."""
@@ -574,8 +864,293 @@ class NFCApp(ctk.CTk):
         if self.is_scanning and not self.is_registration_mode:
             self.after(1000, self._checkpoint_scan_loop)
 
-    def on_station_change(self, station: str):
-        """Handle station change."""
+    def erase_tag_settings(self):
+        """Erase tag functionality from settings panel."""
+        # Disable button during operation
+        self.settings_erase_btn.configure(state="disabled")
+
+        # Create cancel button underneath
+        self.erase_cancel_btn = ctk.CTkButton(
+            self.settings_erase_btn.master,
+            text="Cancel",
+            command=self.cancel_erase_settings,
+            width=150,
+            height=35,
+            font=self.fonts['button'],
+            corner_radius=8,
+            fg_color="#dc3545",
+            hover_color="#c82333"
+        )
+        self.erase_cancel_btn.pack(pady=5)
+
+        # Start countdown and operation
+        self._erase_operation_active = True
+        self._countdown_erase_settings(10)
+
+        thread = threading.Thread(target=self._erase_tag_thread_settings)
+        thread.daemon = True
+        thread.start()
+
+    def cancel_erase_settings(self):
+        """Cancel erase operation from settings."""
+        self._erase_operation_active = False
+        self.nfc_service.cancel_read()
+        self.update_status("Erase cancelled", "warning")
+        self._cleanup_erase_settings()
+
+    def _cleanup_erase_settings(self):
+        """Clean up erase UI in settings."""
+        self.settings_erase_btn.configure(state="normal")
+        if hasattr(self, 'erase_cancel_btn'):
+            self.erase_cancel_btn.destroy()
+            delattr(self, 'erase_cancel_btn')
+
+    def _countdown_erase_settings(self, countdown: int):
+        """Countdown for erase in settings."""
+        if countdown > 0 and self._erase_operation_active:
+            self.update_status(f"Tap tag to erase... {countdown}s", "info", False)
+            self.after(1000, lambda: self._countdown_erase_settings(countdown - 1))
+        elif self._erase_operation_active:
+            self._erase_operation_active = False
+            self.update_status("No tag detected", "error")
+            self._erase_complete_settings(None, False)
+
+    def _erase_tag_thread_settings(self):
+        """Thread for erase operation in settings."""
+        tag = self.nfc_service.read_tag(timeout=10)
+        if tag and self._erase_operation_active:
+            self._erase_operation_active = False
+            success = self.tag_manager.clear_tag(tag.uid)
+            self.after(0, self._erase_complete_settings, tag.uid, success)
+
+    def _erase_complete_settings(self, tag_uid: Optional[str], success: bool):
+        """Handle erase completion in settings."""
+        self._cleanup_erase_settings()
+        if success and tag_uid:
+            self.update_status("✓ Tag erased", "success")
+            self.after(2000, self.refresh_guest_data)
+        elif tag_uid:
+            self.update_status("Tag was not registered", "warning")
+        else:
+            self.update_status("No tag detected", "error")
+
+    def tag_info(self):
+        """Show tag information functionality."""
+        # Disable button during operation
+        self.tag_info_btn.configure(state="disabled")
+
+        # Create cancel button underneath
+        self.tag_info_cancel_btn = ctk.CTkButton(
+            self.tag_info_btn.master,
+            text="Cancel",
+            command=self.cancel_tag_info,
+            width=150,
+            height=35,
+            font=self.fonts['button'],
+            corner_radius=8,
+            fg_color="#dc3545",
+            hover_color="#c82333"
+        )
+        self.tag_info_cancel_btn.pack(pady=5)
+
+        # Start countdown and operation
+        self._tag_info_operation_active = True
+        self._countdown_tag_info(10)
+
+        thread = threading.Thread(target=self._tag_info_thread)
+        thread.daemon = True
+        thread.start()
+
+    def cancel_tag_info(self):
+        """Cancel tag info operation."""
+        self._tag_info_operation_active = False
+        self.nfc_service.cancel_read()
+        self.update_status("Tag info cancelled", "warning")
+        self._cleanup_tag_info()
+
+    def _cleanup_tag_info(self):
+        """Clean up tag info UI."""
+        self.tag_info_btn.configure(state="normal")
+        if hasattr(self, 'tag_info_cancel_btn'):
+            self.tag_info_cancel_btn.destroy()
+            delattr(self, 'tag_info_cancel_btn')
+        if hasattr(self, 'tag_info_display'):
+            self.tag_info_display.destroy()
+            delattr(self, 'tag_info_display')
+
+    def _countdown_tag_info(self, countdown: int):
+        """Countdown for tag info."""
+        if countdown > 0 and self._tag_info_operation_active:
+            self.update_status(f"Tap tag for info... {countdown}s", "info", False)
+            self.after(1000, lambda: self._countdown_tag_info(countdown - 1))
+        elif self._tag_info_operation_active:
+            self._tag_info_operation_active = False
+            self.update_status("No tag detected", "error")
+            self._tag_info_complete(None)
+
+    def _tag_info_thread(self):
+        """Thread for tag info operation."""
+        tag = self.nfc_service.read_tag(timeout=10)
+        if tag and self._tag_info_operation_active:
+            self._tag_info_operation_active = False
+            info = self.tag_manager.get_tag_info(tag.uid)
+            self.after(0, self._tag_info_complete, info)
+
+    def _tag_info_complete(self, tag_info: Optional[Dict]):
+        """Display tag information in a new window."""
+        self._cleanup_tag_info()
+
+        if tag_info:
+            # Create info window
+            info_window = ctk.CTkToplevel(self)
+            info_window.title("")
+            info_window.geometry("400x300")
+            info_window.transient(self)
+            info_window.grab_set()
+
+            # Center window
+            info_window.update_idletasks()
+            x = (info_window.winfo_screenwidth() // 2) - (info_window.winfo_width() // 2)
+            y = (info_window.winfo_screenheight() // 2) - (info_window.winfo_height() // 2)
+            info_window.geometry(f"+{x}+{y}")
+
+            # Title
+            title_label = ctk.CTkLabel(info_window, text="Tag Information", font=self.fonts['heading'])
+            title_label.pack(pady=20)
+
+            # Find guest details
+            guest = self.sheets_service.find_guest_by_id(tag_info['original_id'])
+
+            # Find last check-in
+            last_station = None
+            last_time = None
+            for station, time in tag_info['check_ins'].items():
+                if time:
+                    last_station = station.title()
+                    last_time = time
+
+            # Create info content
+            info_content = f"""Name: {guest.firstname if guest else 'Unknown'} {guest.lastname if guest else ''}
+Last Check-in Station: {last_station if last_station else 'None'}
+Last Check-in Time: {last_time if last_time else 'None'}"""
+
+            info_label = ctk.CTkLabel(
+                info_window,
+                text=info_content,
+                font=self.fonts['body'],
+                justify="left"
+            )
+            info_label.pack(pady=30)
+
+            # Close button
+            close_btn = ctk.CTkButton(
+                info_window,
+                text="Close",
+                command=info_window.destroy,
+                width=100,
+                height=35
+            )
+            close_btn.pack(pady=20)
+
+            self.update_status(f"Tag info: {guest.full_name if guest else 'Unknown'}", "success")
+        else:
+            self.update_status("Tag not registered", "warning")
+
+    def show_logs(self):
+        """Show log viewer dialog."""
+        log_window = ctk.CTkToplevel(self)
+        log_window.title("Application Logs")
+        log_window.geometry("800x600")
+        log_window.transient(self)
+        log_window.grab_set()
+
+        # Center window
+        log_window.update_idletasks()
+        x = (log_window.winfo_screenwidth() // 2) - (log_window.winfo_width() // 2)
+        y = (log_window.winfo_screenheight() // 2) - (log_window.winfo_height() // 2)
+        log_window.geometry(f"+{x}+{y}")
+
+        # Title
+        title_label = ctk.CTkLabel(log_window, text="", font=self.fonts['heading'])
+        title_label.pack(pady=20)
+
+        # Log display frame
+        log_frame = ctk.CTkFrame(log_window)
+        log_frame.pack(fill="both", expand=True, padx=20, pady=(0, 20))
+
+        # Scrollable text area
+        log_text = ctk.CTkTextbox(
+            log_frame,
+            font=CTkFont(family="Monaco", size=12),
+            wrap="word"
+        )
+        log_text.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Load and display logs
+        try:
+            log_file = Path(self.config['log_file'])
+            if log_file.exists():
+                with open(log_file, 'r') as f:
+                    log_content = f.read()
+
+                # Pretty format the logs
+                lines = log_content.split('\n')
+                formatted_lines = []
+
+                for line in lines:
+                    if not line.strip():
+                        continue
+
+                    # Color code by log level
+                    if ' - ERROR - ' in line:
+                        formatted_lines.append(f"🔴 {line}")
+                    elif ' - WARNING - ' in line:
+                        formatted_lines.append(f"🟡 {line}")
+                    elif ' - INFO - ' in line:
+                        formatted_lines.append(f"🔵 {line}")
+                    elif ' - DEBUG - ' in line:
+                        formatted_lines.append(f"⚪ {line}")
+                    else:
+                        formatted_lines.append(line)
+
+                # Show latest 200 lines
+                recent_lines = formatted_lines[-200:] if len(formatted_lines) > 200 else formatted_lines
+                log_text.insert("1.0", "\n".join(recent_lines))
+
+                # Scroll to bottom
+                log_text.see("end")
+            else:
+                log_text.insert("1.0", "No log file found.")
+
+        except Exception as e:
+            log_text.insert("1.0", f"Error loading logs: {e}")
+
+        # Close button
+        close_btn = ctk.CTkButton(
+            log_window,
+            text="Close",
+            command=log_window.destroy,
+            width=100,
+            height=35
+        )
+        close_btn.pack(pady=(0, 20))
+
+    def rewrite_tag(self):
+        """Enter rewrite tag mode."""
+        self.settings_visible = False
+        self.is_rewrite_mode = True
+        self.is_registration_mode = False  # Ensure registration mode is off
+        self.update_settings_button()
+        self.update_mode_content()
+
+
+    def on_station_button_click(self, station: str):
+        """Handle station button click."""
+        # Exit rewrite mode if active and cancel any operations
+        if self.is_rewrite_mode:
+            self.cancel_any_rewrite_operations()
+            self.exit_rewrite_mode()
+
         self.current_station = station
         self.is_registration_mode = (station == "Reception")
 
@@ -583,11 +1158,36 @@ class NFCApp(ctk.CTk):
         if self.is_registration_mode:
             self.is_scanning = False
 
+        # Update button highlighting
+        self.update_station_buttons()
+
         self.update_mode_content()
         self.update_status(f"Switched to {station}", "info")
 
         # Auto-refresh guest list to show station-specific check-ins
         self.refresh_guest_data()
+
+    def update_station_buttons(self):
+        """Update station button styling to highlight current selection."""
+        for station, btn in self.station_buttons.items():
+            if station == self.current_station:
+                # Highly highlighted selected station with border and glow effect
+                btn.configure(
+                    fg_color="#ff6b35",
+                    hover_color="#e55a2b",
+                    text_color="white",
+                    border_color="#fff",
+                    border_width=3
+                )
+            else:
+                # Normal button styling
+                btn.configure(
+                    fg_color="#3b82f6",
+                    hover_color="#2563eb",
+                    text_color="white",
+                    border_color="#3b82f6",
+                    border_width=2
+                )
 
     def toggle_guest_list(self):
         """Toggle guest list visibility."""
@@ -604,11 +1204,19 @@ class NFCApp(ctk.CTk):
         """Toggle check-in button visibility in guest list."""
         self.checkin_buttons_visible = not self.checkin_buttons_visible
 
-        # Update button text
+        # Update button text and color
         if self.checkin_buttons_visible:
-            self.manual_checkin_btn.configure(text="Hide Check-in Buttons")
+            self.manual_checkin_btn.configure(
+                text="Cancel Manual Check-in",
+                fg_color="#dc3545",
+                hover_color="#c82333"
+            )
         else:
-            self.manual_checkin_btn.configure(text="Manual Check-in")
+            self.manual_checkin_btn.configure(
+                text="Manual Check-in",
+                fg_color="#ff9800",
+                hover_color="#f57c00"
+            )
 
         # Refresh guest table to show/hide check-in buttons
         if self.guest_list_visible:
@@ -641,41 +1249,39 @@ class NFCApp(ctk.CTk):
 
         # Add guests
         for i, guest in enumerate(guests):
-            # Show check-in status for current station
-            check_in_time = guest.get_check_in_time(self.current_station.lower())
-            if check_in_time:
-                status = f"✓ {check_in_time}"
-            else:
-                status = "-"
-
-            # Show check-in button only if checkin_buttons_visible and not checked in
-            action = ""
-            if self.checkin_buttons_visible and not check_in_time:
-                action = "Check-in"
-
-            item = self.guest_tree.insert("", "end", values=(
+            values = [
                 guest.original_id,
                 guest.firstname,
-                guest.lastname,
-                status,
-                action
-            ))
+                guest.lastname
+            ]
 
-            # Apply row coloring based on check-in status
-            if check_in_time:
-                # Row is green when checked in
-                self.guest_tree.item(item, tags=("checked_in",))
-                self.guest_tree.tag_configure("checked_in", background="#2d5a2d", foreground="white")
-            else:
-                # Normal row color when not checked in
-                self.guest_tree.item(item, tags=("not_checked_in",))
-                self.guest_tree.tag_configure("not_checked_in", background="#212121", foreground="white")
+            # Add check-in status for each station
+            for station in self.config['stations']:
+                check_in_time = guest.get_check_in_time(station.lower())
+                if check_in_time:
+                    values.append(f"✓ {check_in_time}")
+                elif self.checkin_buttons_visible:
+                    values.append("Check-in")
+                else:
+                    values.append("-")
+
+            item = self.guest_tree.insert("", "end", values=values)
+
+        # Apply current sort (default to Last Name A-Z on first load)
+        self._apply_current_sort()
 
         # Only show "Loaded X guests" message at startup
         if not hasattr(self, '_initial_load_complete'):
             self.update_status(f"Loaded {len(guests)} guests", "success")
-            self.after(2000, lambda: self.update_status("Ready", "normal"))
+            # Fade to appropriate status after 2 seconds
+            if self.is_rewrite_mode:
+                self.after(2000, lambda: self.update_status("Check-In Paused", "warning"))
+            else:
+                self.after(2000, lambda: self.update_status("Ready", "normal"))
             self._initial_load_complete = True
+        else:
+            # Show refresh confirmation for manual refreshes
+            self.update_status(f"✓ Refreshed {len(guests)} guests", "success")
 
     def filter_guest_list(self):
         """Filter guest list based on search."""
@@ -690,35 +1296,27 @@ class NFCApp(ctk.CTk):
             if (search_term in str(guest.original_id) or
                 search_term in guest.firstname.lower() or
                 search_term in guest.lastname.lower()):
-                # Show check-in status for current station
-                check_in_time = guest.get_check_in_time(self.current_station.lower())
-                if check_in_time:
-                    status = f"✓ {check_in_time}"
-                else:
-                    status = "-"
 
-                # Show check-in button only if checkin_buttons_visible and not checked in
-                action = ""
-                if self.checkin_buttons_visible and not check_in_time:
-                    action = "Check-in"
-
-                item = self.guest_tree.insert("", "end", values=(
+                values = [
                     guest.original_id,
                     guest.firstname,
-                    guest.lastname,
-                    status,
-                    action
-                ))
+                    guest.lastname
+                ]
 
-                # Apply row coloring based on check-in status
-                if check_in_time:
-                    # Row is green when checked in
-                    self.guest_tree.item(item, tags=("checked_in",))
-                    self.guest_tree.tag_configure("checked_in", background="#2d5a2d", foreground="white")
-                else:
-                    # Normal row color when not checked in
-                    self.guest_tree.item(item, tags=("not_checked_in",))
-                    self.guest_tree.tag_configure("not_checked_in", background="#212121", foreground="white")
+                # Add check-in status for each station
+                for station in self.config['stations']:
+                    check_in_time = guest.get_check_in_time(station.lower())
+                    if check_in_time:
+                        values.append(f"✓ {check_in_time}")
+                    elif self.checkin_buttons_visible:
+                        values.append("Check-in")
+                    else:
+                        values.append("-")
+
+                item = self.guest_tree.insert("", "end", values=values)
+
+        # Apply current sort to filtered results
+        self._apply_current_sort()
 
     def on_guest_select(self, event):
         """Handle guest selection from list."""
@@ -731,23 +1329,231 @@ class NFCApp(ctk.CTk):
                 # Fill registration form
                 self.id_entry.delete(0, 'end')
                 self.id_entry.insert(0, str(guest_id))
+            elif self.is_rewrite_mode:
+                # Fill rewrite form
+                self.rewrite_id_entry.delete(0, 'end')
+                self.rewrite_id_entry.insert(0, str(guest_id))
             elif self.is_manual_checkin_mode:
                 # Fill manual check-in form
                 self.manual_id_entry.delete(0, 'end')
                 self.manual_id_entry.insert(0, str(guest_id))
 
+    def exit_rewrite_mode(self):
+        """Exit rewrite mode and return to station view."""
+        # Cancel any ongoing operations first
+        self.cancel_any_rewrite_operations()
+
+        self.is_rewrite_mode = False
+        self.settings_visible = False
+        self.is_registration_mode = (self.current_station == "Reception")
+        self.update_settings_button()
+        self.update_mode_content()
+
+    def cancel_any_rewrite_operations(self):
+        """Cancel any ongoing rewrite operations."""
+        # Cancel rewrite operation
+        if hasattr(self, '_rewrite_operation_active'):
+            self._rewrite_operation_active = False
+        if hasattr(self, 'nfc_service'):
+            self.nfc_service.cancel_read()
+        # Clean up UI if needed
+        if hasattr(self, 'rewrite_cancel_btn'):
+            self.rewrite_cancel_btn.destroy()
+            delattr(self, 'rewrite_cancel_btn')
+
+    def rewrite_to_band(self):
+        """Handle rewrite to band action."""
+        guest_id = self.rewrite_id_entry.get().strip()
+
+        if not guest_id:
+            self.update_status("Please enter a guest ID", "error")
+            return
+
+        try:
+            guest_id = int(guest_id)
+        except ValueError:
+            self.update_status("Invalid ID format", "error")
+            return
+
+        # Disable UI during operation
+        self.rewrite_btn.configure(state="disabled")
+        self.rewrite_id_entry.configure(state="disabled")
+
+        # Show cancel button
+        self.rewrite_cancel_btn = ctk.CTkButton(
+            self.rewrite_btn.master,
+            text="Cancel",
+            command=self.cancel_rewrite_band,
+            width=80,
+            height=50,
+            font=self.fonts['button'],
+            corner_radius=8,
+            fg_color="#dc3545",
+            hover_color="#c82333"
+        )
+        self.rewrite_cancel_btn.pack(side="left", padx=(10, 0))
+
+        # Start tag detection immediately with countdown display
+        self._rewrite_operation_active = True
+        self._countdown_rewrite_band(guest_id, 10)
+
+        # Start the actual rewrite operation in background
+        thread = threading.Thread(target=self._rewrite_to_band_thread, args=(guest_id,))
+        thread.daemon = True
+        thread.start()
+
+    def cancel_rewrite_band(self):
+        """Cancel rewrite operation."""
+        self._rewrite_operation_active = False
+        self.nfc_service.cancel_read()
+        self.update_status("Rewrite operation cancelled", "warning")
+        self._cleanup_rewrite_band_ui()
+
+    def _cleanup_rewrite_band_ui(self):
+        """Clean up rewrite operation UI."""
+        self.rewrite_btn.configure(state="normal")
+        self.rewrite_id_entry.configure(state="normal")
+        if hasattr(self, 'rewrite_cancel_btn'):
+            self.rewrite_cancel_btn.destroy()
+            delattr(self, 'rewrite_cancel_btn')
+
+    def _countdown_rewrite_band(self, guest_id: int, countdown: int):
+        """Show countdown for rewrite band operation."""
+        if countdown > 0 and self._rewrite_operation_active:
+            self.update_status(f"Tap wristband now... {countdown}s", "info", False)
+            self.after(1000, lambda: self._countdown_rewrite_band(guest_id, countdown - 1))
+        elif self._rewrite_operation_active:
+            # Timeout reached
+            self._rewrite_operation_active = False
+            self.update_status("No tag detected", "error")
+            self._rewrite_band_complete(None)
+
+    def _rewrite_to_band_thread(self, guest_id: int):
+        """Thread function for rewriting to band."""
+        # Use 10-second timeout to match countdown
+        result = self.tag_manager.register_tag_to_guest(guest_id)
+
+        # Stop countdown and update UI in main thread
+        if result:
+            self._rewrite_operation_active = False
+            self.after(0, self._rewrite_band_complete, result)
+        # If no result and operation still active, let countdown handle timeout
+
+    def _rewrite_band_complete(self, result: Optional[Dict]):
+        """Handle rewrite completion."""
+        # Clean up UI
+        self._cleanup_rewrite_band_ui()
+
+        if result:
+            self.update_status(f"✓ Tag rewritten for {result['guest_name']}", "success")
+            self.rewrite_guest_name_label.configure(text=result['guest_name'])
+
+            # Show success buttons
+            self.show_rewrite_success_buttons()
+
+            # Refresh guest list to show updated info
+            self.refresh_guest_data()
+        else:
+            self.update_status("No tag detected", "error")
+
+        self.rewrite_id_entry.focus()
+
+    def show_rewrite_success_buttons(self):
+        """Show success buttons after rewrite completion."""
+        # Create success button frame
+        success_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        success_frame.place(relx=0.5, rely=0.75, anchor="center")
+
+        # Rewrite another button
+        rewrite_another_btn = ctk.CTkButton(
+            success_frame,
+            text="Rewrite Another Tag",
+            command=self.clear_rewrite_form,
+            width=180,
+            height=40,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#ff9800",
+            hover_color="#f57c00"
+        )
+        rewrite_another_btn.pack(side="left", padx=5)
+
+        # Return to check-in button
+        checkin_btn = ctk.CTkButton(
+            success_frame,
+            text="Return to Check-In Mode",
+            command=self.return_to_checkin_mode,
+            width=180,
+            height=40,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#2196F3",
+            hover_color="#1976D2"
+        )
+        checkin_btn.pack(side="left", padx=5)
+
+        # Return to settings button
+        settings_btn = ctk.CTkButton(
+            success_frame,
+            text="← Return to Settings",
+            command=self.exit_rewrite_mode,
+            width=180,
+            height=40,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#6c757d",
+            hover_color="#5a6268"
+        )
+        settings_btn.pack(side="left", padx=5)
+
+    def return_to_checkin_mode(self):
+        """Return to normal check-in mode."""
+        self.is_rewrite_mode = False
+        self.current_station = "Reception"  # Default to reception
+        self.is_registration_mode = True
+        self.update_station_buttons()
+        self.update_mode_content()
+
+    def clear_rewrite_form(self):
+        """Clear the rewrite form and hide success buttons."""
+        self.rewrite_id_entry.delete(0, 'end')
+        self.rewrite_guest_name_label.configure(text="")
+        # Only show "Ready" when not in settings mode
+        if not self.settings_visible:
+            self.update_status("Ready", "normal")
+        # Recreate the rewrite content to remove success buttons
+        self.update_mode_content()
+
     def on_tree_motion(self, event):
-        """Handle mouse motion over tree for cursor changes."""
+        """Handle mouse motion over tree for cursor changes and hover styling."""
         # Get the item and column under mouse
         item = self.guest_tree.identify("item", event.x, event.y)
         column = self.guest_tree.identify("column", event.x, event.y)
 
-        # Check if hovering over check-in button
-        if item and column == "#5":
-            values = self.guest_tree.item(item, "values")
-            if len(values) > 4 and values[4] == "Check-in":
-                self.guest_tree.configure(cursor="hand2")
-                return
+        # Clear previous hover styling
+        if self.hovered_item:
+            current_tags = list(self.guest_tree.item(self.hovered_item, "tags"))
+            if "checkin_hover" in current_tags:
+                current_tags.remove("checkin_hover")
+                self.guest_tree.item(self.hovered_item, tags=current_tags)
+            self.hovered_item = None
+
+        # Check if hovering over check-in button in any station column
+        if item and column:
+            column_index = int(column.replace('#', '')) - 1
+            # Station columns start at index 3 (after id, first, last)
+            if column_index >= 3 and column_index < 3 + len(self.config['stations']):
+                values = self.guest_tree.item(item, "values")
+                if len(values) > column_index and values[column_index] == "Check-in":
+                    # Apply hover styling
+                    current_tags = list(self.guest_tree.item(item, "tags"))
+                    current_tags.append("checkin_hover")
+                    self.guest_tree.item(item, tags=current_tags)
+                    self.hovered_item = item
+
+                    # Set hand cursor
+                    self.guest_tree.configure(cursor="hand2")
+                    return
 
         # Reset cursor
         self.guest_tree.configure(cursor="")
@@ -763,30 +1569,28 @@ class NFCApp(ctk.CTk):
         item = self.guest_tree.identify("item", event.x, event.y)
         column = self.guest_tree.identify("column", event.x, event.y)
 
-        # Only handle clicks on the action column (5th column)
-        if column != "#5":
+        if not item or not column:
             return
 
-        # Get current values
-        values = self.guest_tree.item(item, "values")
-        action_text = values[4]  # Action is the 5th value
+        column_index = int(column.replace('#', '')) - 1
+        # Station columns start at index 3 (after id, first, last)
+        if column_index >= 3 and column_index < 3 + len(self.config['stations']):
+            values = self.guest_tree.item(item, "values")
 
-        # Only proceed if it says "Check-in"
-        if action_text != "Check-in":
-            return
+            # Only proceed if it says "Check-in"
+            if len(values) > column_index and values[column_index] == "Check-in":
+                guest_id = values[0]
+                station = self.config['stations'][column_index - 3]
+                self.quick_checkin_at_station(guest_id, station)
 
-        # Get guest ID and perform check-in
-        guest_id = values[0]
-        self.quick_checkin(guest_id)
-
-    def quick_checkin(self, guest_id):
-        """Perform quick check-in for a guest."""
+    def quick_checkin_at_station(self, guest_id, station):
+        """Perform quick check-in for a guest at a specific station."""
         # Update status
-        self.update_status(f"Checking in guest {guest_id}...", "info")
+        self.update_status(f"Checking in guest {guest_id} at {station}...", "info")
 
         # Run in thread
         thread = threading.Thread(target=self._quick_checkin_thread,
-                                args=(guest_id, self.current_station))
+                                args=(guest_id, station))
         thread.daemon = True
         thread.start()
 
@@ -807,84 +1611,7 @@ class NFCApp(ctk.CTk):
         except Exception as e:
             self.after(0, self.update_status, f"Error: {str(e)}", "error")
 
-    def erase_tag(self):
-        """Erase tag functionality."""
-        # Disable button during operation
-        self.erase_btn.configure(state="disabled")
 
-        # Show cancel button
-        self.erase_cancel_btn = ctk.CTkButton(
-            self.erase_btn.master,
-            text="Cancel",
-            command=self.cancel_erase,
-            width=80,
-            height=35,
-            font=self.fonts['button'],
-            corner_radius=8,
-            fg_color="#dc3545",
-            hover_color="#c82333"
-        )
-        self.erase_cancel_btn.pack(side="left", padx=(0, 5), before=self.erase_btn)
-
-        # Start tag detection immediately with countdown display
-        self._erase_operation_active = True
-        self._countdown_erase_tag(10)
-
-        # Start the actual erase operation in background
-        thread = threading.Thread(target=self._erase_tag_thread)
-        thread.daemon = True
-        thread.start()
-
-    def cancel_erase(self):
-        """Cancel erase operation."""
-        self._erase_operation_active = False
-        self.nfc_service.cancel_read()
-        self.update_status("Erase operation cancelled", "warning")
-        self._cleanup_erase_ui()
-
-    def _cleanup_erase_ui(self):
-        """Clean up erase operation UI."""
-        self.erase_btn.configure(state="normal")
-        if hasattr(self, 'erase_cancel_btn'):
-            self.erase_cancel_btn.destroy()
-            delattr(self, 'erase_cancel_btn')
-
-    def _countdown_erase_tag(self, countdown: int):
-        """Show countdown for erase tag operation."""
-        if countdown > 0 and self._erase_operation_active:
-            self.update_status(f"Tap tag to erase... {countdown}s", "info", False)
-            self.after(1000, lambda: self._countdown_erase_tag(countdown - 1))
-        elif self._erase_operation_active:
-            # Timeout reached
-            self._erase_operation_active = False
-            self.update_status("No tag detected", "error")
-            self._erase_complete(None, False)
-
-    def _erase_tag_thread(self):
-        """Thread function for erasing tag."""
-        # Use 10-second timeout to match countdown
-        tag = self.nfc_service.read_tag(timeout=10)
-
-        if tag and self._erase_operation_active:
-            # Stop countdown and process erase
-            self._erase_operation_active = False
-            success = self.tag_manager.clear_tag(tag.uid)
-            self.after(0, self._erase_complete, tag.uid, success)
-        # If no tag and operation still active, let countdown handle timeout
-
-    def _erase_complete(self, tag_uid: Optional[str], success: bool):
-        """Handle erase completion."""
-        # Clean up UI
-        self._cleanup_erase_ui()
-
-        if success and tag_uid:
-            self.update_status("✓ Tag erased", "success")
-            # Delay refresh to let confirmation message show for 2s
-            self.after(2000, self.refresh_guest_data)
-        elif tag_uid:
-            self.update_status("Tag was not registered", "warning")
-        else:
-            self.update_status("No tag detected", "error")
 
     def load_logo(self):
         """Load and display logo."""
@@ -911,13 +1638,18 @@ class NFCApp(ctk.CTk):
         color = color_map.get(status_type, "#ffffff")
         self.status_label.configure(text=message, text_color=color)
 
-        # Auto-fade to "Ready" after 2 seconds for non-normal messages
-        if auto_fade and status_type != "normal":
+        # Auto-fade after 2 seconds for non-normal messages (except countdown messages)
+        if auto_fade and status_type != "normal" and not "..." in message:
             # Cancel any existing fade timer
             if hasattr(self, '_fade_timer'):
                 self.after_cancel(self._fade_timer)
-            # Set new fade timer
-            self._fade_timer = self.after(2000, lambda: self.update_status("Ready", "normal", False))
+            # Set new fade timer - fade to appropriate status based on mode
+            def fade_to_default():
+                if self.is_rewrite_mode:
+                    self.update_status("Check-In Paused", "warning", False)
+                else:
+                    self.update_status("Ready", "normal", False)
+            self._fade_timer = self.after(2000, fade_to_default)
 
     def on_closing(self):
         """Handle window closing."""
