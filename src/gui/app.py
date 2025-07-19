@@ -57,6 +57,10 @@ class NFCApp(ctk.CTk):
         self._active_operations = 0  # Track active operations
         self.is_refreshing = False  # Flag to prevent concurrent refreshes
 
+        # Tag info display state
+        self.is_displaying_tag_info = False
+        self.tag_info_data = None
+
         # Window setup
         self.title(config['ui']['window_title'])
         self.geometry(f"{config['ui']['window_width']}x{config['ui']['window_height']}")
@@ -207,7 +211,7 @@ class NFCApp(ctk.CTk):
 
         station_label = ctk.CTkLabel(
             station_frame,
-            text="Current Station:",
+            text="",
             font=CTkFont(size=18, weight="bold")
         )
         station_label.pack(side="left", padx=(0, 15))
@@ -241,18 +245,22 @@ class NFCApp(ctk.CTk):
         self.status_frame.pack(fill="x", pady=(10, 10))
         self.status_frame.pack_propagate(False)
 
-        # Left side - main status
+        # Center - main status
         self.status_label = ctk.CTkLabel(
             self.status_frame,
             text="Ready",
             font=self.fonts['status']
         )
-        self.status_label.pack(side="left", expand=True)
+        self.status_label.pack(expand=True)
 
     def create_action_buttons(self):
         """Create action buttons."""
         button_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         button_frame.pack(fill="x")
+
+        # Left frame for buttons
+        left_frame = ctk.CTkFrame(button_frame, fg_color="transparent")
+        left_frame.pack(side="left")
 
         # Right frame for buttons
         right_frame = ctk.CTkFrame(button_frame, fg_color="transparent")
@@ -260,7 +268,7 @@ class NFCApp(ctk.CTk):
 
         # Reception mode toggle button (only visible at Reception)
         self.reception_mode_btn = ctk.CTkButton(
-            right_frame,
+            left_frame,
             text="Switch to Check-in Mode",
             command=self.toggle_reception_mode,
             width=180,
@@ -315,7 +323,7 @@ class NFCApp(ctk.CTk):
             font=self.fonts['body'],
             text_color="#4CAF50"
         )
-        self.sync_status_label.pack(side="left", padx=(20, 0))
+        self.sync_status_label.pack(side="right", padx=(20, 0))
 
         # Guest list (using tkinter Treeview for table)
         self.create_guest_table()
@@ -347,12 +355,12 @@ class NFCApp(ctk.CTk):
         self.guest_tree.heading("first", text="First Name", anchor="w")
         self.guest_tree.heading("last", text="Last Name", anchor="w")
 
-        # Set responsive column widths
+        # Set responsive column widths with padding for visual separation
         self.guest_tree.column("id", width=80, minwidth=60, anchor="w")
         self.guest_tree.column("first", width=150, minwidth=100, anchor="w")
         self.guest_tree.column("last", width=150, minwidth=100, anchor="w")
 
-        # Set headers and widths for all stations with responsive sizing
+        # Set headers and widths for all stations with responsive sizing and padding
         for i, station in enumerate(self.config['stations']):
             self.guest_tree.heading(station.lower(), text=station, anchor="w")
             self.guest_tree.column(station.lower(), width=120, minwidth=80, anchor="w")
@@ -366,12 +374,17 @@ class NFCApp(ctk.CTk):
                        background="#212121",
                        foreground="white",
                        fieldbackground="#212121",
-                       borderwidth=0,
-                       rowheight=25)
+                       borderwidth=1,
+                       relief="flat",
+                       rowheight=25,
+                       font=("TkFixedFont", 12, "normal"))
+
         style.configure("Treeview.Heading",
                        background="#323232",
                        foreground="white",
-                       borderwidth=0)
+                       borderwidth=1,
+                       relief="flat",
+                       font=("TkFixedFont", 13, "bold"))
 
         # Map item states to colors
         style.map('Treeview',
@@ -400,6 +413,94 @@ class NFCApp(ctk.CTk):
         # Configure hover tag for check-in buttons
         self.guest_tree.tag_configure("checkin_hover", background="#ff9800", foreground="white")
 
+    def create_tag_info_content(self):
+        """Create inline tag info display."""
+        if not self.tag_info_data:
+            return
+
+        # Main container
+        main_container = ctk.CTkFrame(self.content_frame, fg_color="transparent")
+        main_container.pack(fill="both", expand=True)
+
+        # Center frame for content
+        center_frame = ctk.CTkFrame(main_container, fg_color="transparent")
+        center_frame.place(relx=0.5, rely=0.5, anchor="center")
+
+        # Guest details
+        guest = self.tag_info_data['guest']
+        check_ins = self.tag_info_data['check_ins']
+
+        # Guest name (large and bold)
+        name_label = ctk.CTkLabel(
+            center_frame,
+            text=f"{guest.firstname} {guest.lastname}",
+            font=CTkFont(size=32, weight="bold"),
+            text_color="#4CAF50"
+        )
+        name_label.pack(pady=(0, 30))
+
+        # Find last check-in
+        last_station = None
+        last_time = None
+        for station, time in check_ins.items():
+            if time:
+                last_station = station.title()
+                last_time = time
+
+        # Last check-in info
+        if last_station and last_time:
+            checkin_text = f"Last check-in: {last_station} at {last_time}"
+        else:
+            checkin_text = "No check-ins recorded"
+
+        checkin_label = ctk.CTkLabel(
+            center_frame,
+            text=checkin_text,
+            font=CTkFont(size=18),
+            text_color="#ffffff"
+        )
+        checkin_label.pack(pady=(0, 40))
+
+        # Close button (red X, same style as hamburger menu)
+        close_btn = ctk.CTkButton(
+            center_frame,
+            text="✕",
+            command=self.close_tag_info,
+            width=50,
+            height=50,
+            corner_radius=10,
+            font=CTkFont(size=20, weight="bold"),
+            fg_color="#dc3545",
+            hover_color="#c82333"
+        )
+        close_btn.pack()
+
+    def close_tag_info(self):
+        """Close tag info display and return to normal mode."""
+        self.is_displaying_tag_info = False
+        self.tag_info_data = None
+
+        # Always return to main view (not settings)
+        self.settings_visible = False
+        if hasattr(self, '_came_from_settings'):
+            delattr(self, '_came_from_settings')
+
+        self.update_mode_content()
+
+        # Resume scanning if in checkpoint mode
+        if not self.is_registration_mode or self.is_checkpoint_mode:
+            self.start_checkpoint_scanning()
+
+        # Set appropriate status based on current mode
+        if self.is_rewrite_mode:
+            self.update_status("Check-In Paused", "warning")
+        elif self.current_station == "Reception" and not self.is_checkpoint_mode:
+            self.update_status("Ready. Waiting for tag registration", "normal")
+        elif self.current_station == "Reception" and self.is_checkpoint_mode:
+            self.update_status("Ready. Waiting for Check-In", "normal")
+        else:
+            self.update_status("Ready. Waiting for Check-In", "normal")
+
     def create_settings_content(self):
         """Create settings content in the main content area."""
         # Main container that fills and centers content
@@ -410,13 +511,7 @@ class NFCApp(ctk.CTk):
         center_frame = ctk.CTkFrame(main_container, fg_color="transparent")
         center_frame.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Settings title
-        settings_title = ctk.CTkLabel(
-            center_frame,
-            text="Tools 🔧",
-            font=self.fonts['heading']
-        )
-        settings_title.pack(pady=(0, 30))
+
 
         # Buttons container
         buttons_container = ctk.CTkFrame(center_frame, fg_color="transparent")
@@ -497,6 +592,20 @@ class NFCApp(ctk.CTk):
             hover_color="#7b1fa2"
         )
         self.log_btn.pack(pady=10)
+
+        # Developer Mode button
+        self.dev_mode_btn = ctk.CTkButton(
+            buttons_container,
+            text="Developer Mode",
+            command=self.enter_developer_mode,
+            width=200,
+            height=50,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#6c757d",
+            hover_color="#5a6268"
+        )
+        self.dev_mode_btn.pack(pady=10)
 
     def sort_treeview(self, col):
         """Sort treeview by column."""
@@ -582,6 +691,18 @@ class NFCApp(ctk.CTk):
             self.content_frame.configure(height=600)
             self.create_settings_content()
             return
+        elif self.is_displaying_tag_info:
+            # Hide guest list when displaying tag info
+            if self.guest_list_visible:
+                self.list_frame.pack_forget()
+                self.guest_list_visible = False
+            # Hide buttons when displaying tag info
+            self.manual_checkin_btn.pack_forget()
+            self.reception_mode_btn.pack_forget()  # Hide reception mode button
+            # Expand content frame for tag info display
+            self.content_frame.configure(height=400)
+            self.create_tag_info_content()
+            return
         else:
             # Restore compact content frame
             self.content_frame.configure(height=200)
@@ -592,8 +713,19 @@ class NFCApp(ctk.CTk):
             # Show buttons when not in settings
             self.manual_checkin_btn.pack(side="left", padx=5)
 
-        # Update button visibility
-        self.manual_checkin_btn.configure(text="Manual Check-in")
+        # Update button text based on current manual check-in state
+        if self.checkin_buttons_visible:
+            self.manual_checkin_btn.configure(
+                text="Cancel Manual Check-in",
+                fg_color="#dc3545",
+                hover_color="#c82333"
+            )
+        else:
+            self.manual_checkin_btn.configure(
+                text="Manual Check-in",
+                fg_color="#ff9800",
+                hover_color="#f57c00"
+            )
 
         # Show Reception mode toggle only at Reception station
         if self.current_station == "Reception":
@@ -851,8 +983,8 @@ class NFCApp(ctk.CTk):
             # Clear form after delay
             self.after(2000, self.clear_registration_form)
 
-            # Refresh guest list after delay to ensure queue is updated
-            self.after(100, self.refresh_guest_data)
+            # Refresh guest list after delay to ensure queue is updated and status is visible
+            self.after(2500, self.refresh_guest_data)
         else:
             self.update_status("No tag detected", "error")
 
@@ -889,8 +1021,17 @@ class NFCApp(ctk.CTk):
 
     def _checkpoint_scan_loop(self):
         """Continuous scanning loop for checkpoint mode."""
-        # Check if we should continue scanning (handles both regular checkpoint and Reception checkpoint mode)
-        if ((not self.is_registration_mode or self.is_checkpoint_mode) and self.is_scanning):
+        # Background scanning rules:
+        # 1. Always scan in checkpoint mode (non-reception stations)
+        # 2. Only scan at Reception if in checkpoint mode (not registration mode)
+        # 3. Allow scanning during tag info display if in check-in mode
+
+        in_checkin_mode = not self.is_registration_mode or self.is_checkpoint_mode
+        allow_during_tag_info = self.is_displaying_tag_info and in_checkin_mode
+
+        should_scan = (in_checkin_mode and self.is_scanning) or allow_during_tag_info
+
+        if should_scan:
             # Start scan in thread
             thread = threading.Thread(target=self._scan_for_checkin)
             thread.daemon = True
@@ -900,12 +1041,56 @@ class NFCApp(ctk.CTk):
         """Scan for check-in (thread function)."""
         self.operation_in_progress = True
         self._active_operations += 1
-        result = self.tag_manager.process_checkpoint_scan(self.current_station)
+
+        # Read NFC tag first
+        tag = self.nfc_service.read_tag(timeout=5)
+
+        if not tag:
+            self.operation_in_progress = False
+            self._active_operations -= 1
+            return
+
+        # Check if tag is registered
+        if tag.uid not in self.tag_manager.tag_registry:
+            self.operation_in_progress = False
+            self._active_operations -= 1
+            self.after(0, self.update_status, "Unregistered tag", "error")
+            return
+
+        original_id = self.tag_manager.tag_registry[tag.uid]
+
+        # Get guest info and check for duplicates
+        guest = self.sheets_service.find_guest_by_id(original_id)
+        if guest:
+            # Check both Google Sheets and local queue
+            sheets_checkin = guest.is_checked_in_at(self.current_station.lower())
+            local_checkin = self.tag_manager.check_in_queue.has_check_in(original_id, self.current_station)
+
+            if sheets_checkin or local_checkin:
+                self.operation_in_progress = False
+                self._active_operations -= 1
+                self.after(0, self.update_status, f"Guest already checked in at {self.current_station}", "warning")
+                # Continue scanning after showing duplicate warning
+                self.after(2000, self._restart_scanning_after_duplicate)
+                return
+
+        # Process normal check-in
+        result = self.tag_manager.process_checkpoint_scan_with_tag(tag, self.current_station)
         self.operation_in_progress = False
         self._active_operations -= 1
 
         # Update UI in main thread
         self.after(0, self._checkin_complete, result)
+
+    def _restart_scanning_after_duplicate(self):
+        """Restart scanning after duplicate warning."""
+        # Check if we should restart scanning (including during tag info)
+        in_checkin_mode = not self.is_registration_mode or self.is_checkpoint_mode
+        allow_during_tag_info = self.is_displaying_tag_info and in_checkin_mode
+
+        should_scan = (in_checkin_mode and self.is_scanning) or allow_during_tag_info
+        if should_scan:
+            self._checkpoint_scan_loop()
 
     def _checkin_complete(self, result: Optional[Dict]):
         """Handle check-in completion."""
@@ -916,8 +1101,8 @@ class NFCApp(ctk.CTk):
             )
             self.update_status(f"Checked in: {result['guest_name']}", "success")
 
-            # Add small delay to ensure local queue is updated before refresh
-            self.after(100, self.refresh_guest_data)
+            # Add delay to ensure status visible before refresh
+            self.after(2500, self.refresh_guest_data)
 
             # Reset after delay
             self.after(3000, lambda: self.checkpoint_status.configure(
@@ -925,12 +1110,19 @@ class NFCApp(ctk.CTk):
                 text_color="#ffffff"
             ))
 
-        # Continue scanning after a short delay
-        if self.is_scanning and (not self.is_registration_mode or self.is_checkpoint_mode):
+        # Continue scanning after a short delay - only in check-in modes
+        in_checkin_mode = not self.is_registration_mode or self.is_checkpoint_mode
+        allow_during_tag_info = self.is_displaying_tag_info and (self.is_checkpoint_mode or not self.is_registration_mode)
+
+        should_continue = (self.is_scanning and in_checkin_mode) or allow_during_tag_info
+        if should_continue:
             self.after(1000, self._checkpoint_scan_loop)
 
     def erase_tag_settings(self):
         """Erase tag functionality from settings panel."""
+        # Stop background scanning to prevent NFC conflicts
+        self.is_scanning = False
+
         # Disable button during operation
         self.settings_erase_btn.configure(state="disabled")
 
@@ -1001,6 +1193,22 @@ class NFCApp(ctk.CTk):
 
     def tag_info(self):
         """Show tag information functionality."""
+        # Allow tag info even during background scanning (different NFC operation)
+        if self._active_operations > 1:  # Allow if only background scanning is active
+            self.update_status("Another operation in progress", "warning")
+            return
+
+        # Stop background scanning to prevent NFC conflicts
+        self.is_scanning = False
+
+        # Track if we came from settings
+        if self.settings_visible:
+            self._came_from_settings = True
+
+        # Mark operation in progress
+        self.operation_in_progress = True
+        self._active_operations += 1
+
         # Disable button during operation
         self.tag_info_btn.configure(state="disabled")
 
@@ -1029,19 +1237,27 @@ class NFCApp(ctk.CTk):
     def cancel_tag_info(self):
         """Cancel tag info operation."""
         self._tag_info_operation_active = False
-        self.nfc_service.cancel_read()
+        self.operation_in_progress = False
+        self._active_operations -= 1
+
+        # Cancel NFC read safely
+        try:
+            self.nfc_service.cancel_read()
+        except Exception as e:
+            self.logger.warning(f"Error cancelling NFC read: {e}")
+
         self.update_status("Tag info cancelled", "warning")
         self._cleanup_tag_info()
 
     def _cleanup_tag_info(self):
         """Clean up tag info UI."""
-        self.tag_info_btn.configure(state="normal")
-        if hasattr(self, 'tag_info_cancel_btn'):
-            self.tag_info_cancel_btn.destroy()
-            delattr(self, 'tag_info_cancel_btn')
-        if hasattr(self, 'tag_info_display'):
-            self.tag_info_display.destroy()
-            delattr(self, 'tag_info_display')
+        try:
+            self.tag_info_btn.configure(state="normal")
+            if hasattr(self, 'tag_info_cancel_btn'):
+                self.tag_info_cancel_btn.destroy()
+                delattr(self, 'tag_info_cancel_btn')
+        except Exception as e:
+            self.logger.warning(f"Error cleaning up tag info UI: {e}")
 
     def _countdown_tag_info(self, countdown: int):
         """Countdown for tag info."""
@@ -1050,74 +1266,61 @@ class NFCApp(ctk.CTk):
             self.after(1000, lambda: self._countdown_tag_info(countdown - 1))
         elif self._tag_info_operation_active:
             self._tag_info_operation_active = False
+            self.operation_in_progress = False
+            self._active_operations -= 1
             self.update_status("No tag detected", "error")
             self._tag_info_complete(None)
 
     def _tag_info_thread(self):
         """Thread for tag info operation."""
-        tag = self.nfc_service.read_tag(timeout=10)
-        if tag and self._tag_info_operation_active:
-            self._tag_info_operation_active = False
-            info = self.tag_manager.get_tag_info(tag.uid)
-            self.after(0, self._tag_info_complete, info)
+        try:
+            tag = self.nfc_service.read_tag(timeout=10)
+            if tag and self._tag_info_operation_active:
+                self._tag_info_operation_active = False
+                self.operation_in_progress = False
+                self._active_operations -= 1
+                info = self.tag_manager.get_tag_info(tag.uid)
+                self.after(0, self._tag_info_complete, info)
+        except Exception as e:
+            self.logger.error(f"Error in tag info thread: {e}")
+            if self._tag_info_operation_active:
+                self._tag_info_operation_active = False
+                self.operation_in_progress = False
+                self._active_operations -= 1
+                self.after(0, self.update_status, "Tag read error", "error")
+                self.after(0, self._cleanup_tag_info)
 
     def _tag_info_complete(self, tag_info: Optional[Dict]):
-        """Display tag information in a new window."""
+        """Display tag information inline."""
         self._cleanup_tag_info()
 
         if tag_info:
-            # Create info window
-            info_window = ctk.CTkToplevel(self)
-            info_window.title("")
-            info_window.geometry("400x300")
-            info_window.transient(self)
-            info_window.grab_set()
-
-            # Center window
-            info_window.update_idletasks()
-            x = (info_window.winfo_screenwidth() // 2) - (info_window.winfo_width() // 2)
-            y = (info_window.winfo_screenheight() // 2) - (info_window.winfo_height() // 2)
-            info_window.geometry(f"+{x}+{y}")
-
-            # Title
-            title_label = ctk.CTkLabel(info_window, text="Tag Information", font=self.fonts['heading'])
-            title_label.pack(pady=20)
-
             # Find guest details
             guest = self.sheets_service.find_guest_by_id(tag_info['original_id'])
 
-            # Find last check-in
-            last_station = None
-            last_time = None
-            for station, time in tag_info['check_ins'].items():
-                if time:
-                    last_station = station.title()
-                    last_time = time
+            if guest:
+                # Clear settings mode and switch to inline display mode
+                self.settings_visible = False
+                self.is_displaying_tag_info = True
+                self.tag_info_data = {
+                    'guest': guest,
+                    'check_ins': tag_info['check_ins']
+                }
+                self.update_mode_content()
 
-            # Create info content
-            info_content = f"""Name: {guest.firstname if guest else 'Unknown'} {guest.lastname if guest else ''}
-Last Check-in Station: {last_station if last_station else 'None'}
-Last Check-in Time: {last_time if last_time else 'None'}"""
-
-            info_label = ctk.CTkLabel(
-                info_window,
-                text=info_content,
-                font=self.fonts['body'],
-                justify="left"
-            )
-            info_label.pack(pady=30)
-
-            # Close button
-            close_btn = ctk.CTkButton(
-                info_window,
-                text="Close",
-                command=info_window.destroy,
-                width=100,
-                height=35
-            )
-            close_btn.pack(pady=20)
-
-            self.update_status(f"Tag info: {guest.full_name if guest else 'Unknown'}", "success")
+                # Resume background scanning only if in check-in mode
+                if self.is_checkpoint_mode or (not self.is_registration_mode):
+                    self.start_checkpoint_scanning()
+                    # Show appropriate status for check-in mode
+                    if self.current_station == "Reception" and self.is_checkpoint_mode:
+                        self.update_status("Ready. Waiting for Check-In", "normal")
+                    else:
+                        self.update_status("Ready. Waiting for Check-In", "normal")
+                else:
+                    # Registration mode - no background scanning during tag info
+                    self.update_status("Ready. Waiting for tag registration", "normal")
+            else:
+                self.update_status("Guest data not found", "warning")
         else:
             self.update_status("Tag not registered", "warning")
 
@@ -1200,13 +1403,227 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
         )
         close_btn.pack(pady=(0, 20))
 
+    def enter_developer_mode(self):
+        """Show password dialog for developer mode."""
+        password_window = ctk.CTkToplevel(self)
+        password_window.title("Developer Mode")
+        password_window.geometry("300x300")
+        password_window.transient(self)
+        password_window.grab_set()
+
+        # Center window
+        password_window.update_idletasks()
+        x = (password_window.winfo_screenwidth() // 2) - (password_window.winfo_width() // 2)
+        y = (password_window.winfo_screenheight() // 2) - (password_window.winfo_height() // 2)
+        password_window.geometry(f"+{x}+{y}")
+
+        # Title
+        title_label = ctk.CTkLabel(password_window, text="Enter Password", font=self.fonts['heading'])
+        title_label.pack(pady=20)
+
+        # Password entry
+        password_entry = ctk.CTkEntry(
+            password_window,
+            placeholder_text="Password",
+            show="*",
+            width=200,
+            height=40,
+            font=self.fonts['body']
+        )
+        password_entry.pack(pady=10)
+        password_entry.focus()
+
+        # Status label
+        status_label = ctk.CTkLabel(password_window, text="", font=self.fonts['body'])
+        status_label.pack(pady=5)
+
+        def check_password():
+            entered_password = password_entry.get()
+            correct_password = self.config.get('developer', {}).get('password', '8888')
+
+            if entered_password == correct_password:
+                password_window.destroy()
+                self.show_developer_mode()
+            else:
+                status_label.configure(text="Incorrect password", text_color="#f44336")
+                password_entry.delete(0, 'end')
+
+        # Enter key binding
+        password_entry.bind("<Return>", lambda e: check_password())
+
+        # Buttons
+        button_frame = ctk.CTkFrame(password_window, fg_color="transparent")
+        button_frame.pack(pady=20)
+
+        login_btn = ctk.CTkButton(
+            button_frame,
+            text="Enter",
+            command=check_password,
+            width=80,
+            height=35,
+            font=self.fonts['button']
+        )
+        login_btn.pack(side="left", padx=5)
+
+        cancel_btn = ctk.CTkButton(
+            button_frame,
+            text="Cancel",
+            command=password_window.destroy,
+            width=80,
+            height=35,
+            font=self.fonts['button'],
+            fg_color="#6c757d",
+            hover_color="#5a6268"
+        )
+        cancel_btn.pack(side="left", padx=5)
+
+    def show_developer_mode(self):
+        """Show developer mode interface."""
+        dev_window = ctk.CTkToplevel(self)
+        dev_window.title("Developer Mode")
+        dev_window.geometry("300x300")
+        dev_window.resizable(False, False)
+        dev_window.transient(self)
+        dev_window.grab_set()
+
+        # Center window
+        dev_window.update_idletasks()
+        x = (dev_window.winfo_screenwidth() // 2) - 150
+        y = (dev_window.winfo_screenheight() // 2) - 150
+        dev_window.geometry(f"+{x}+{y}")
+
+        # Main frame with padding
+        main_frame = ctk.CTkFrame(dev_window)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Title
+        title_label = ctk.CTkLabel(main_frame, text="⚠️ Developer Mode ⚠️", font=self.fonts['heading'])
+        title_label.pack(pady=(20, 30))
+
+        # Clear All Data button
+        self.clear_all_btn = ctk.CTkButton(
+            main_frame,
+            text="Clear All Guest Data",
+            command=lambda: self.clear_all_data(dev_window),
+            width=220,
+            height=50,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#dc3545",
+            hover_color="#c82333"
+        )
+        self.clear_all_btn.pack(pady=(0, 30))
+
+        # Close button
+        close_btn = ctk.CTkButton(
+            main_frame,
+            text="Close",
+            command=dev_window.destroy,
+            width=100,
+            height=35
+        )
+        close_btn.pack(pady=(0, 20))
+
+    def clear_all_data(self, dev_window):
+        """Clear all guest data with confirmation."""
+        # Confirmation dialog
+        confirm_window = ctk.CTkToplevel(dev_window)
+        confirm_window.title("Confirm Clear All Data")
+        confirm_window.geometry("300x300")
+        confirm_window.transient(dev_window)
+        confirm_window.grab_set()
+
+        # Center window
+        confirm_window.update_idletasks()
+        x = (confirm_window.winfo_screenwidth() // 2) - (confirm_window.winfo_width() // 2)
+        y = (confirm_window.winfo_screenheight() // 2) - (confirm_window.winfo_height() // 2)
+        confirm_window.geometry(f"+{x}+{y}")
+
+        # Warning
+        warning_label = ctk.CTkLabel(
+            confirm_window,
+            text="🚨 CAUTION 🚨\n\nThis will permanently delete:\n• All local check-in data\n• All Google Sheets check-in data\n\nThis action CANNOT be undone!",
+            font=self.fonts['button'],
+            text_color="#dc3545",
+            justify="center"
+        )
+        warning_label.pack(pady=20)
+
+        # Buttons
+        button_frame = ctk.CTkFrame(confirm_window, fg_color="transparent")
+        button_frame.pack(pady=20)
+
+        def execute_clear():
+            confirm_window.destroy()
+            dev_window.destroy()
+            self._execute_clear_all_data()
+
+        confirm_btn = ctk.CTkButton(
+            button_frame,
+            text="YES, DELETE ALL",
+            command=execute_clear,
+            width=120,
+            height=40,
+            corner_radius=8,
+            font=CTkFont(size=12, weight="bold"),
+            fg_color="#dc3545",
+            hover_color="#c82333"
+        )
+        confirm_btn.pack(side="left", padx=10)
+
+        cancel_btn = ctk.CTkButton(
+            button_frame,
+            text="Cancel",
+            command=confirm_window.destroy,
+            width=100,
+            height=40,
+            corner_radius=8,
+            font=self.fonts['button'],
+            fg_color="#6c757d",
+            hover_color="#5a6268"
+        )
+        cancel_btn.pack(side="left", padx=10)
+
+    def _execute_clear_all_data(self):
+        """Execute the clear all data operation."""
+        self.update_status("Clearing all data...", "warning")
+
+        # Run in thread to avoid blocking UI
+        thread = threading.Thread(target=self._clear_all_data_thread)
+        thread.daemon = True
+        thread.start()
+
+    def _clear_all_data_thread(self):
+        """Thread function to clear all data."""
+        try:
+            # Clear local data
+            self.tag_manager.clear_all_local_data()
+
+            # Clear Google Sheets data
+            success = self.tag_manager.clear_all_sheets_data()
+
+            if success:
+                self.after(0, self.update_status, "✓ All data cleared successfully", "success")
+                # Refresh to show empty list
+                self.after(1000, self.refresh_guest_data)
+            else:
+                self.after(0, self.update_status, "Failed to clear Google Sheets data", "error")
+
+        except Exception as e:
+            self.logger.error(f"Error clearing data: {e}")
+            self.after(0, self.update_status, f"Error clearing data: {str(e)}", "error")
+
     def rewrite_tag(self):
         """Enter rewrite tag mode."""
+        # Stop background scanning to prevent NFC conflicts
+        self.is_scanning = False
+
         self.settings_visible = False
         self.is_rewrite_mode = True
         self.is_registration_mode = False  # Ensure registration mode is off
         self.update_settings_button()
         self.update_mode_content()
+        self.update_status("Check-In Paused", "warning")
 
 
     def on_station_button_click(self, station: str):
@@ -1215,6 +1632,11 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
         if self.is_rewrite_mode:
             self.cancel_any_rewrite_operations()
             self.exit_rewrite_mode()
+
+        # Close settings if open
+        if self.settings_visible:
+            self.settings_visible = False
+            self.update_settings_button()
 
         self.current_station = station
         self.is_registration_mode = (station == "Reception")
@@ -1386,6 +1808,8 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
         """Thread function for refreshing data."""
         try:
             guests = self.sheets_service.get_all_guests()
+            # Resolve any sync conflicts (local data vs Google Sheets)
+            self.tag_manager.resolve_sync_conflicts(guests)
             # Always update table even if empty to show local data
             self.after(0, self._update_guest_table, guests)
         except Exception as e:
@@ -1451,12 +1875,17 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
             # Fade to appropriate status after 2 seconds
             if self.is_rewrite_mode:
                 self.after(2000, lambda: self.update_status("Check-In Paused", "warning"))
+            elif self.current_station == "Reception" and not self.is_checkpoint_mode:
+                self.after(2000, lambda: self.update_status("Ready. Waiting for tag registration", "normal"))
+            elif self.current_station == "Reception" and self.is_checkpoint_mode:
+                self.after(2000, lambda: self.update_status("Ready. Waiting for Check-In", "normal"))
             else:
-                self.after(2000, lambda: self.update_status("Ready", "normal"))
+                self.after(2000, lambda: self.update_status("Ready. Waiting for Check-In", "normal"))
             self._initial_load_complete = True
-        else:
-            # Show refresh confirmation for manual refreshes
-            self.update_status(f"✓ Refreshed {len(guests)} guests", "success")
+        elif self.is_rewrite_mode:
+            # In rewrite mode, go straight to paused status
+            self.update_status("Check-In Paused", "warning")
+        # No refresh messages - refresh silently
 
     def filter_guest_list(self):
         """Filter guest list based on search."""
@@ -1534,6 +1963,13 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
         self.update_settings_button()
         self.update_mode_content()
 
+        # Resume scanning if in checkpoint mode
+        if not self.is_registration_mode or self.is_checkpoint_mode:
+            self.start_checkpoint_scanning()
+
+        # Restore operational status
+        self.update_status("Ready", "normal")
+
     def cancel_any_rewrite_operations(self):
         """Cancel any ongoing rewrite operations."""
         # Cancel rewrite operation
@@ -1563,6 +1999,7 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
         # Disable UI during operation
         self.rewrite_btn.configure(state="disabled")
         self.rewrite_id_entry.configure(state="disabled")
+        self.exit_rewrite_btn.configure(state="disabled")  # Hide X button during operation
 
         # Show cancel button
         self.rewrite_cancel_btn = ctk.CTkButton(
@@ -1598,6 +2035,7 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
         """Clean up rewrite operation UI."""
         self.rewrite_btn.configure(state="normal")
         self.rewrite_id_entry.configure(state="normal")
+        self.exit_rewrite_btn.configure(state="normal")  # Re-enable X button
         if hasattr(self, 'rewrite_cancel_btn'):
             self.rewrite_cancel_btn.destroy()
             delattr(self, 'rewrite_cancel_btn')
@@ -1616,11 +2054,11 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
     def _rewrite_to_band_thread(self, guest_id: int):
         """Thread function for rewriting to band."""
         # Use 10-second timeout to match countdown
-        result = self.tag_manager.register_tag_to_guest(guest_id)
+        result = self.tag_manager.rewrite_tag_to_guest(guest_id)
 
         # Stop countdown and update UI in main thread
         if result:
-            self._rewrite_operation_active = False
+            self._rewrite_operation_active = False  # Stop countdown
             self.after(0, self._rewrite_band_complete, result)
         # If no result and operation still active, let countdown handle timeout
 
@@ -1630,14 +2068,17 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
         self._cleanup_rewrite_band_ui()
 
         if result:
-            self.update_status(f"✓ Tag rewritten for {result['guest_name']}", "success")
-            self.rewrite_guest_name_label.configure(text=result['guest_name'])
+            # Show confirmation in label only (not duplicate in status)
+            self.rewrite_guest_name_label.configure(text=f"✓ Rewritten for {result['guest_name']}")
 
-            # Show success buttons
-            self.show_rewrite_success_buttons()
+            # Clear the input field
+            self.rewrite_id_entry.delete(0, 'end')
 
-            # Refresh guest list to show updated info
-            self.refresh_guest_data()
+            # Fade the success message after 4 seconds
+            self.after(4000, lambda: self.rewrite_guest_name_label.configure(text=""))
+
+            # Delay refresh to ensure confirmation is visible
+            self.after(2500, self.refresh_guest_data)
         else:
             self.update_status("No tag detected", "error")
 
@@ -1645,51 +2086,23 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
 
     def show_rewrite_success_buttons(self):
         """Show success buttons after rewrite completion."""
-        # Create success button frame
+        # Create success button frame with more padding
         success_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        success_frame.place(relx=0.5, rely=0.75, anchor="center")
+        success_frame.place(relx=0.5, rely=0.8, anchor="center")
 
         # Rewrite another button
         rewrite_another_btn = ctk.CTkButton(
             success_frame,
             text="Rewrite Another Tag",
             command=self.clear_rewrite_form,
-            width=180,
+            width=200,
             height=40,
             corner_radius=8,
             font=self.fonts['button'],
             fg_color="#ff9800",
             hover_color="#f57c00"
         )
-        rewrite_another_btn.pack(side="left", padx=5)
-
-        # Return to check-in button
-        checkin_btn = ctk.CTkButton(
-            success_frame,
-            text="Return to Check-In Mode",
-            command=self.return_to_checkin_mode,
-            width=180,
-            height=40,
-            corner_radius=8,
-            font=self.fonts['button'],
-            fg_color="#2196F3",
-            hover_color="#1976D2"
-        )
-        checkin_btn.pack(side="left", padx=5)
-
-        # Return to settings button
-        settings_btn = ctk.CTkButton(
-            success_frame,
-            text="← Return to Settings",
-            command=self.exit_rewrite_mode,
-            width=180,
-            height=40,
-            corner_radius=8,
-            font=self.fonts['button'],
-            fg_color="#6c757d",
-            hover_color="#5a6268"
-        )
-        settings_btn.pack(side="left", padx=5)
+        rewrite_another_btn.pack(pady=20)
 
     def return_to_checkin_mode(self):
         """Return to normal check-in mode."""
@@ -1800,8 +2213,10 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
             if result:
                 # Update status first
                 self.after(0, self.update_status, f"✓ Checked in {result['guest_name']} at {station}", "success")
-                # Delay refresh to ensure queue is updated
-                self.after(200, self.refresh_guest_data)
+                # Exit manual check-in mode
+                self.after(50, self.toggle_manual_checkin)
+                # Delay refresh to ensure status is visible for minimum 2s
+                self.after(2500, self.refresh_guest_data)
             else:
                 self.after(0, self.update_status, f"Guest ID {guest_id} not found", "error")
         except Exception as e:
@@ -1844,8 +2259,12 @@ Last Check-in Time: {last_time if last_time else 'None'}"""
             def fade_to_default():
                 if self.is_rewrite_mode:
                     self.update_status("Check-In Paused", "warning", False)
+                elif self.current_station == "Reception" and not self.is_checkpoint_mode:
+                    self.update_status("Ready. Waiting for tag registration", "normal", False)
+                elif self.current_station == "Reception" and self.is_checkpoint_mode:
+                    self.update_status("Ready. Waiting for Check-In", "normal", False)
                 else:
-                    self.update_status("Ready", "normal", False)
+                    self.update_status("Ready. Waiting for Check-In", "normal", False)
             self._fade_timer = self.after(2000, fade_to_default)
 
     def on_closing(self):

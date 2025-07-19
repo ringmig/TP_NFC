@@ -67,6 +67,54 @@ class TagManager:
         except Exception as e:
             self.logger.error(f"Error saving tag registry: {e}")
 
+    def rewrite_tag_to_guest(self, original_id: int) -> Optional[Dict[str, str]]:
+        """
+        Rewrite an NFC tag to a guest without auto-check-in.
+
+        Args:
+            original_id: Guest's original ID
+
+        Returns:
+            Dict with tag info and guest name if successful, None otherwise
+        """
+        # First, verify guest exists in Google Sheets
+        guest = self.sheets_service.find_guest_by_id(original_id)
+        if not guest:
+            self.logger.error(f"Guest with ID {original_id} not found in spreadsheet")
+            return None
+
+        # Read NFC tag
+        self.logger.info(f"Waiting for NFC tag to rewrite to {guest.full_name}...")
+        tag = self.nfc_service.read_tag(timeout=10)
+
+        if not tag:
+            self.logger.error("No tag detected")
+            return None
+
+        # Check if tag is already registered
+        if tag.uid in self.tag_registry:
+            existing_id = self.tag_registry[tag.uid]
+            if existing_id != original_id:
+                self.logger.warning(f"Tag {tag.uid} was registered to ID {existing_id}, rewriting to {original_id}")
+
+        # Register the tag
+        tag.register_to_guest(original_id, guest.full_name)
+        self.tag_registry[tag.uid] = original_id
+
+        # Save registry
+        self.save_registry()
+
+        self.logger.info(f"Successfully rewritten tag {tag.uid} to {guest.full_name}")
+
+        # NOTE: No auto-check-in for rewrite operations
+
+        return {
+            'tag_uid': tag.uid,
+            'original_id': original_id,
+            'guest_name': guest.full_name,
+            'registered_at': datetime.now().isoformat()
+        }
+
     def register_tag_to_guest(self, original_id: int) -> Optional[Dict[str, str]]:
         """
         Register an NFC tag to a guest.
@@ -118,6 +166,44 @@ class TagManager:
             'registered_at': datetime.now().isoformat()
         }
 
+    def process_checkpoint_scan_with_tag(self, tag, station: str) -> Optional[Dict[str, str]]:
+        """
+        Process a checkpoint scan with already-read tag.
+
+        Args:
+            tag: Already read NFC tag
+            station: Station name where the scan occurred
+
+        Returns:
+            Dict with scan info if successful, None otherwise
+        """
+        # Look up original ID
+        if tag.uid not in self.tag_registry:
+            self.logger.error(f"Unregistered tag: {tag.uid}")
+            return None
+
+        original_id = self.tag_registry[tag.uid]
+
+        # Get guest info
+        guest = self.sheets_service.find_guest_by_id(original_id)
+        if not guest:
+            self.logger.error(f"Guest with ID {original_id} not found")
+            return None
+
+        # Add to local queue immediately (for instant UI feedback)
+        timestamp = datetime.now().strftime("%H:%M")
+        self.check_in_queue.add_check_in(original_id, station, timestamp, guest.full_name)
+
+        self.logger.info(f"Queued attendance for ID {original_id} at {station}")
+
+        return {
+            'tag_uid': tag.uid,
+            'original_id': original_id,
+            'guest_name': guest.full_name,
+            'station': station,
+            'timestamp': timestamp
+        }
+
     def process_checkpoint_scan(self, station: str) -> Optional[Dict[str, str]]:
         """
         Process a tag scan at a checkpoint.
@@ -148,6 +234,18 @@ class TagManager:
         if not guest:
             self.logger.error(f"Guest with ID {original_id} not found")
             return None
+
+        # Check if already checked in at this station (Google Sheets + local queue)
+        sheets_checkin = guest.is_checked_in_at(station.lower())
+        local_checkin = self.check_in_queue.has_check_in(original_id, station)
+
+        if sheets_checkin or local_checkin:
+            self.logger.warning(f"Guest {guest.full_name} already checked in at {station}")
+            return {
+                'duplicate_checkin': True,
+                'guest_name': guest.full_name,
+                'station': station
+            }
 
         # Add to local queue immediately (for instant UI feedback)
         timestamp = datetime.now().strftime("%H:%M")
@@ -252,6 +350,21 @@ class TagManager:
     def force_sync(self) -> int:
         """Force immediate sync of pending check-ins."""
         return self.check_in_queue.force_sync()
+
+    def resolve_sync_conflicts(self, all_guests) -> None:
+        """Resolve conflicts between local data and Google Sheets."""
+        self.check_in_queue.resolve_sync_conflicts(all_guests)
+
+    def clear_all_local_data(self) -> None:
+        """Clear all local check-in data and tag registry."""
+        self.check_in_queue.clear_all_local_data()
+        self.tag_registry.clear()
+        self.save_registry()
+        self.logger.warning("All local data cleared")
+
+    def clear_all_sheets_data(self) -> bool:
+        """Clear all check-in data from Google Sheets."""
+        return self.sheets_service.clear_all_check_in_data()
 
     def shutdown(self) -> None:
         """Clean shutdown of tag manager."""
