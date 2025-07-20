@@ -1,7 +1,0 @@
-=================================
- LICENSE
-=================================
-Copyright (C) WAKDEV [www.wakdev.com] - All Rights Reserved
-
-All information, intellectual and technical concepts contained herein app remains the property of WAKDEV.
-Terms Of Use : https://www.wakdev.com/en/apps/terms.html

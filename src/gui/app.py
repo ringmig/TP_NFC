@@ -1053,12 +1053,10 @@ class NFCApp(ctk.CTk):
             self.after(0, self.update_status, "Enter Guest ID first", "error")
             self.after(3000, lambda: self.update_status(self.STATUS_CHECKIN_PAUSED, "warning"))
         else:
-            # ID field has value - only show message if rewrite operation is not already in progress
+            # ID field has value
             self._active_operations -= 1
-            # Don't show "Press Rewrite Tag Button to begin" if button was already pressed
-            if not (hasattr(self, '_rewrite_check_operation_active') and self._rewrite_check_operation_active):
-                self.after(0, self.update_status, "Press Rewrite Tag Button to begin", "info")
-                self.after(3000, lambda: self.update_status(self.STATUS_CHECKIN_PAUSED, "warning"))
+            self.after(0, self.update_status, "Press Rewrite Tag Button to begin", "info")
+            self.after(3000, lambda: self.update_status(self.STATUS_CHECKIN_PAUSED, "warning"))
 
         # Continue scanning after delay
         self.after(3500, self._rewrite_scan_loop)
@@ -1364,77 +1362,6 @@ class NFCApp(ctk.CTk):
             self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
         elif not self.settings_visible:
             self.update_status(self.get_ready_status_message(), "normal")
-
-    def rewrite_to_band(self):
-        """Handle rewrite to band action."""
-        guest_id_str = self.rewrite_id_entry.get().strip()
-
-        if not guest_id_str:
-            self.update_status("Please enter a guest ID", "error")
-            return
-
-        try:
-            guest_id = int(guest_id_str)
-        except ValueError:
-            self.update_status("Invalid ID format", "error")
-            return
-
-        # Stop background scanning during operation
-        self._rewrite_check_operation_active = True
-
-        # Disable UI during operation
-        self.rewrite_btn.configure(state="disabled")
-        self.rewrite_id_entry.configure(state="disabled")
-        self.exit_rewrite_btn.configure(state="disabled")
-
-        # Show cancel button
-        self.rewrite_cancel_btn = ctk.CTkButton(
-            self.rewrite_btn.master,
-            text="Cancel",
-            command=self.cancel_rewrite,
-            width=80,
-            height=50,
-            font=self.fonts['button'],
-            corner_radius=8,
-            fg_color="#dc3545",
-            hover_color="#c82333"
-        )
-        self.rewrite_cancel_btn.pack(side="left", padx=(10, 0))
-
-        # Start countdown and operation
-        self._countdown_rewrite_band(guest_id, 10)
-
-        # Start the actual operation in background
-        thread = threading.Thread(target=self._check_tag_registration_thread, args=(guest_id,))
-        thread.daemon = True
-        thread.start()
-
-    def cancel_rewrite(self):
-        """Cancel rewrite operation."""
-        self._rewrite_check_operation_active = False
-        self.nfc_service.cancel_read()
-        self.update_status("Rewrite operation cancelled", "warning")
-        self._enable_rewrite_ui()
-
-    def _countdown_rewrite_band(self, guest_id: int, countdown: int):
-        """Show countdown for rewrite band operation."""
-        if countdown > 0 and self._rewrite_check_operation_active:
-            self.update_status(f"Tap tag now... {countdown}s", "info")
-            self.after(1000, lambda: self._countdown_rewrite_band(guest_id, countdown - 1))
-        elif self._rewrite_check_operation_active:
-            # Timeout reached
-            self._rewrite_check_operation_active = False
-            self.update_status("No tag detected", "error")
-            self._enable_rewrite_ui()
-
-    def _enable_rewrite_ui(self):
-        """Re-enable rewrite UI after operation."""
-        self.rewrite_btn.configure(state="normal")
-        self.rewrite_id_entry.configure(state="normal")
-        self.exit_rewrite_btn.configure(state="normal")
-        if hasattr(self, 'rewrite_cancel_btn'):
-            self.rewrite_cancel_btn.destroy()
-            delattr(self, 'rewrite_cancel_btn')
 
     def toggle_reception_mode(self):
         """Toggle between Registration and Checkpoint mode at Reception."""
@@ -2726,9 +2653,6 @@ class NFCApp(ctk.CTk):
         self.rewrite_id_entry.configure(state="disabled")
         self.exit_rewrite_btn.configure(state="disabled")
 
-        # Stop background message scanning during rewrite operation (but keep NFC service active)
-        self.is_scanning = False
-
         # Cancel any ongoing NFC operations to prevent conflicts
         try:
             self.nfc_service.cancel_read()
@@ -2737,7 +2661,7 @@ class NFCApp(ctk.CTk):
 
         # Start countdown and operation
         self._rewrite_check_operation_active = True
-        self._countdown_rewrite_check(10)
+        self._countdown_rewrite_check(5)
 
         # Start tag check operation
         thread = threading.Thread(target=self._check_tag_registration_thread, args=(guest_id,))
@@ -2759,20 +2683,15 @@ class NFCApp(ctk.CTk):
         """Thread to check if tag is already registered."""
         try:
             # Read tag to check registration
-            tag = self.nfc_service.read_tag(timeout=10)
+            tag = self.nfc_service.read_tag(timeout=5)
+
+            # Always stop countdown when thread completes
+            self._rewrite_check_operation_active = False
 
             if not tag:
-                # Always stop countdown when thread completes
-                self._rewrite_check_operation_active = False
                 self.after(0, self._enable_rewrite_ui)
                 self.after(0, self.update_status, "No tag detected", "error")
                 return
-
-            # Tag detected - stop countdown immediately
-            self._rewrite_check_operation_active = False
-
-            # Clear countdown display
-            self.after(0, self.update_status, "Tag detected - checking registration...", "info")
 
             # Check if tag is registered
             if tag.uid in self.tag_manager.tag_registry:
@@ -2901,8 +2820,6 @@ class NFCApp(ctk.CTk):
             confirm_window.destroy()
             # Clear the guest ID field
             self.rewrite_id_entry.delete(0, 'end')
-            # Restart background scanning
-            self.start_rewrite_tag_scanning()
 
         cancel_btn = ctk.CTkButton(
             button_frame,
@@ -2979,9 +2896,6 @@ class NFCApp(ctk.CTk):
 
         self.rewrite_id_entry.focus()
 
-        # Restart background scanning
-        self.start_rewrite_tag_scanning()
-
     def clear_rewrite_form(self):
         """Clear the rewrite form."""
         self.rewrite_id_entry.delete(0, 'end')
@@ -2998,9 +2912,6 @@ class NFCApp(ctk.CTk):
             self.rewrite_id_entry.configure(state="normal")
         if hasattr(self, 'exit_rewrite_btn'):
             self.exit_rewrite_btn.configure(state="normal")
-
-        # Restart background scanning
-        self.start_rewrite_tag_scanning()
 
     def on_tree_motion(self, event):
         """Handle mouse motion over tree for cursor changes and hover styling."""
