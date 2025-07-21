@@ -1,5 +1,31 @@
 # TP_NFC Project Status
 
+## 🤖 AI Assistant Notes
+
+**For new AI conversations:** This is a production-ready NFC attendance system with complete GUI and backend services.
+
+**Key Architecture:**
+- `src/gui/app.py` - Main GUI (CustomTkinter, 2800+ lines)
+- `src/services/` - Business logic (NFC, Google Sheets, Tag Management)
+- `src/models/` - Data models (NFCTag, GuestRecord)
+- Cross-platform: Windows (.bat) & macOS (.command) scripts
+
+**Current Issues Fixed:**
+- ✅ Tkinter widget destruction errors (safe widget access)
+- ✅ Duplicate NFC scanning loops (thread synchronization)
+- ✅ AttributeError in guest selection (corrected attribute names)
+
+**UI Modes:**
+- Registration mode (Reception station)
+- Checkpoint mode (all stations)
+- Settings panel with advanced operations
+- Tag info display with auto-close
+
+**NFC Services:**
+- Unified backend (nfcpy + pyscard)
+- Auto-platform selection (macOS prefers pyscard)
+- 3-5 second timeout loops for responsiveness
+
 ## ✅ Completed Components
 
 ### Core Infrastructure
@@ -122,36 +148,39 @@ All production-ready in requirements.txt:
 
 ## Current State: 🎉 PRODUCTION READY
 
-**Version 0.1.1 - Enhanced User Experience**
+**Version 0.1.2 - Stability & Threading Fixes**
 
-- **NFC Operations**: ✅ Full tag management with dual backend support
+- **NFC Operations**: ✅ Robust tag management with thread synchronization
 - **Google Sheets**: ✅ Complete integration with conflict resolution
-- **GUI Interface**: ✅ Professional configurable application with smart search
+- **GUI Interface**: ✅ Professional configurable application with safe widget handling
 - **Data Management**: ✅ Failsafe queue system with background sync
-- **User Experience**: ✅ Enhanced keyboard shortcuts and centralized messaging
+- **Stability**: ✅ Fixed widget destruction errors and duplicate scanning threads
 
-## Recent Enhancements (v0.1.1)
+## Recent Fixes (v0.1.2)
+
+### Threading & Stability Fixes
+- **Widget Destruction Errors**: Added `_safe_configure_checkpoint_status()` with existence checks
+- **Duplicate NFC Scanning**: Implemented `_scanning_thread_active` flag to prevent concurrent threads
+- **AttributeError Fix**: Corrected `is_manual_checkin_mode` to `checkin_buttons_visible`
+- **Thread Synchronization**: Added try/finally blocks to ensure proper cleanup
+
+### Technical Implementation Details
+- NFC scanning uses short timeouts (3-5s) for UI responsiveness
+- Background scanning automatically restarts after errors/timeouts
+- Operation flags prevent race conditions between user actions and background tasks
+- Safe widget access patterns prevent Tkinter callback exceptions
+
+## Previous Enhancements (v0.1.1)
 
 ### Smart Search System
 - Multi-word search with order independence
-- Example: "Ahlerup Thomas" finds "Thomas Ahlerup"
 - Searches across ID, first name, last name, and full name
 
-### Configurable Window Modes
-- Normal, maximized, or fullscreen startup modes
-- Platform-specific optimizations for each mode
-- F11 toggle between modes during runtime
-
-### Enhanced User Interface
+### Enhanced User Interface  
 - Centralized status messaging system
 - Keyboard shortcuts (Cmd/Ctrl+F for search, Cmd/Ctrl+R for refresh)
-- Reordered settings menu for better workflow
+- Configurable window modes (normal/maximized/fullscreen)
 - Copyright branding in settings mode
-
-### Improved Cross-Platform Support
-- Better macOS window management fallbacks
-- Enhanced error handling for different tkinter versions
-- Comprehensive logging for troubleshooting
 
 ## Advanced Implementation Highlights
 
