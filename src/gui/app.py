@@ -48,6 +48,7 @@ class NFCApp(ctk.CTk):
         self.is_rewrite_mode = False  # Rewrite tag mode
         self.guests_data = []
         self.is_scanning = False
+        self._scanning_thread_active = False  # Track active scanning thread
         self.erase_confirmation_state = False  # Track erase button confirmation state
 
         # Sorting state - default to Last Name A-Z
@@ -1391,6 +1392,8 @@ class NFCApp(ctk.CTk):
             self.is_scanning = True
             self.logger.debug(f"Starting checkpoint scanning - Registration mode: {self.is_registration_mode}, Checkpoint mode: {self.is_checkpoint_mode}")
             self._checkpoint_scan_loop()
+        elif self.is_scanning:
+            self.logger.debug("Checkpoint scanning already active, skipping start")
 
     def _checkpoint_scan_loop(self):
         """Continuous scanning loop for checkpoint mode."""
@@ -1404,98 +1407,104 @@ class NFCApp(ctk.CTk):
 
         should_scan = (in_checkin_mode and self.is_scanning) or allow_during_tag_info
 
-        if should_scan:
+        if should_scan and not self._scanning_thread_active:
             # Start scan in thread
+            self._scanning_thread_active = True
             thread = threading.Thread(target=self._scan_for_checkin)
             thread.daemon = True
             thread.start()
 
     def _scan_for_checkin(self):
         """Scan for check-in (thread function)."""
-        # Mark as background operation (can be interrupted)
-        self._active_operations += 1
+        try:
+            # Mark as background operation (can be interrupted)
+            self._active_operations += 1
 
-        # Read NFC tag first
-        tag = self.nfc_service.read_tag(timeout=5)
+            # Read NFC tag first
+            tag = self.nfc_service.read_tag(timeout=5)
 
-        if not tag:
-            self._active_operations -= 1
-            # Continue scanning after short delay
-            self.after(100, self._restart_scanning_after_timeout)
-            return
+            if not tag:
+                self._active_operations -= 1
+                # Continue scanning after short delay
+                self.after(100, self._restart_scanning_after_timeout)
+                return
 
-        # Check if tag is registered
-        if tag.uid not in self.tag_manager.tag_registry:
-            self._active_operations -= 1
-            # Only show unregistered tag error in pure checkpoint mode (not registration mode)
-            if not self.is_registration_mode:
-                self.after(0, self.update_status, "Unregistered tag", "error")
+            # Check if tag is registered
+            if tag.uid not in self.tag_manager.tag_registry:
+                self._active_operations -= 1
+                # Only show unregistered tag error in pure checkpoint mode (not registration mode)
+                if not self.is_registration_mode:
+                    self.after(0, self.update_status, "Unregistered tag", "error")
+                    # Continue scanning after showing error
+                    self.after(2000, self._restart_scanning_after_error)
+                else:
+                    # In registration mode, let registration scanning handle unregistered tags
+                    self.after(100, self._restart_scanning_after_timeout)
+                return
+
+            original_id = self.tag_manager.tag_registry[tag.uid]
+
+            # Get guest info and check for duplicates with error handling
+            try:
+                guest = self.sheets_service.find_guest_by_id(original_id)
+            except Exception as e:
+                # Network/connection error - don't show "missing guest" message
+                self._active_operations -= 1
+                self.after(0, self.update_status, "Network error - check connection", "error")
+                self.after(2000, self._restart_scanning_after_error)
+                return
+
+            if not guest:
+                # Guest not found in Google Sheets - silently skip, registration scanning will handle the message
+                self._active_operations -= 1
                 # Continue scanning after showing error
                 self.after(2000, self._restart_scanning_after_error)
-            else:
-                # In registration mode, let registration scanning handle unregistered tags
-                self.after(100, self._restart_scanning_after_timeout)
-            return
+                return
 
-        original_id = self.tag_manager.tag_registry[tag.uid]
+            if guest:
+                try:
+                    # Check both Google Sheets and local queue with error handling (consistent lowercase)
+                    sheets_checkin = guest.is_checked_in_at(self.current_station.lower())
+                    local_checkin = self.tag_manager.check_in_queue.has_check_in(original_id, self.current_station.lower())
 
-        # Get guest info and check for duplicates with error handling
-        try:
-            guest = self.sheets_service.find_guest_by_id(original_id)
-        except Exception as e:
-            # Network/connection error - don't show "missing guest" message
+                    if sheets_checkin or local_checkin:
+                        self._active_operations -= 1
+                        # Get check-in time for consistent messaging like registration mode
+                        local_check_ins = self.tag_manager.get_all_local_check_ins()
+                        guest_local_data = local_check_ins.get(original_id, {})
+                        local_time = guest_local_data.get(self.current_station.lower())
+                        sheets_time = guest.get_check_in_time(self.current_station.lower())
+                        checkin_time = sheets_time or local_time
+
+                        if checkin_time:
+                            status_msg = f"{guest.firstname} {guest.lastname} already checked in at {self.current_station} at {checkin_time}"
+                        else:
+                            status_msg = f"{guest.firstname} {guest.lastname} already checked in at {self.current_station}"
+
+                        self.after(0, self.update_status, status_msg, "warning")
+                        # Continue scanning after showing duplicate warning
+                        self.after(2000, self._restart_scanning_after_duplicate)
+                        return
+                except Exception as e:
+                    self.logger.error(f"Error checking duplicate status: {e}")
+                    # Continue with check-in if duplicate check fails
+
+            # Process normal check-in
+            result = self.tag_manager.process_checkpoint_scan_with_tag(tag, self.current_station)
             self._active_operations -= 1
-            self.after(0, self.update_status, "Network error - check connection", "error")
-            self.after(2000, self._restart_scanning_after_error)
-            return
 
-        if not guest:
-            # Guest not found in Google Sheets - silently skip, registration scanning will handle the message
-            self._active_operations -= 1
-            # Continue scanning after showing error
-            self.after(2000, self._restart_scanning_after_error)
-            return
+            # If result is None (duplicate), it's already been handled
+            if result is None:
+                # Continue scanning after showing duplicate
+                self.after(2000, self._restart_scanning_after_duplicate)
+                return
 
-        if guest:
-            try:
-                # Check both Google Sheets and local queue with error handling (consistent lowercase)
-                sheets_checkin = guest.is_checked_in_at(self.current_station.lower())
-                local_checkin = self.tag_manager.check_in_queue.has_check_in(original_id, self.current_station.lower())
-
-                if sheets_checkin or local_checkin:
-                    self._active_operations -= 1
-                    # Get check-in time for consistent messaging like registration mode
-                    local_check_ins = self.tag_manager.get_all_local_check_ins()
-                    guest_local_data = local_check_ins.get(original_id, {})
-                    local_time = guest_local_data.get(self.current_station.lower())
-                    sheets_time = guest.get_check_in_time(self.current_station.lower())
-                    checkin_time = sheets_time or local_time
-
-                    if checkin_time:
-                        status_msg = f"{guest.firstname} {guest.lastname} already checked in at {self.current_station} at {checkin_time}"
-                    else:
-                        status_msg = f"{guest.firstname} {guest.lastname} already checked in at {self.current_station}"
-
-                    self.after(0, self.update_status, status_msg, "warning")
-                    # Continue scanning after showing duplicate warning
-                    self.after(2000, self._restart_scanning_after_duplicate)
-                    return
-            except Exception as e:
-                self.logger.error(f"Error checking duplicate status: {e}")
-                # Continue with check-in if duplicate check fails
-
-        # Process normal check-in
-        result = self.tag_manager.process_checkpoint_scan_with_tag(tag, self.current_station)
-        self._active_operations -= 1
-
-        # If result is None (duplicate), it's already been handled
-        if result is None:
-            # Continue scanning after showing duplicate
-            self.after(2000, self._restart_scanning_after_duplicate)
-            return
-
-        # Update UI in main thread
-        self.after(0, self._checkin_complete, result)
+            # Update UI in main thread
+            self.after(0, self._checkin_complete, result)
+            
+        finally:
+            # Always clear the thread flag when done
+            self._scanning_thread_active = False
 
     def _restart_scanning_after_duplicate(self):
         """Restart scanning after duplicate warning."""
@@ -1509,29 +1518,36 @@ class NFCApp(ctk.CTk):
 
     def _restart_scanning_after_timeout(self):
         """Restart scanning after timeout (no tag detected)."""
-        # Only restart if we should be scanning and are not already scanning
+        # Check if we should be scanning
         in_checkin_mode = not self.is_registration_mode or self.is_checkpoint_mode
         allow_during_tag_info = self.is_displaying_tag_info and in_checkin_mode
 
-        should_scan = (in_checkin_mode and not self.is_scanning) or allow_during_tag_info
+        should_scan = in_checkin_mode or allow_during_tag_info
         if should_scan:
             self.logger.debug("Restarting scanning after timeout")
-            if not self.is_scanning:
-                self.is_scanning = True
             self._checkpoint_scan_loop()
 
     def _restart_scanning_after_error(self):
         """Restart scanning after error (unregistered tag)."""
-        # Only restart if we should be scanning and are not already scanning
+        # Check if we should be scanning
         in_checkin_mode = not self.is_registration_mode or self.is_checkpoint_mode
         allow_during_tag_info = self.is_displaying_tag_info and in_checkin_mode
 
-        should_scan = (in_checkin_mode and not self.is_scanning) or allow_during_tag_info
+        should_scan = in_checkin_mode or allow_during_tag_info
         if should_scan:
             self.logger.debug("Restarting scanning after error")
-            if not self.is_scanning:
-                self.is_scanning = True
             self._checkpoint_scan_loop()
+
+    def _safe_configure_checkpoint_status(self):
+        """Safely configure checkpoint status widget if it exists."""
+        try:
+            if hasattr(self, 'checkpoint_status') and self.checkpoint_status.winfo_exists():
+                self.checkpoint_status.configure(
+                    text="Waiting for tap...",
+                    text_color="#ffffff"
+                )
+        except Exception as e:
+            self.logger.debug(f"Checkpoint status widget not available: {e}")
 
     def _checkin_complete(self, result: Optional[Dict]):
         """Handle check-in completion."""
@@ -1545,11 +1561,8 @@ class NFCApp(ctk.CTk):
             # Delay refresh to ensure status is visible and sync has time to complete
             self.after(3000, lambda: self.refresh_guest_data(False))
 
-            # Reset after delay
-            self.after(3000, lambda: self.checkpoint_status.configure(
-                text="Waiting for tap...",
-                text_color="#ffffff"
-            ))
+            # Reset after delay with safety check
+            self.after(3000, self._safe_configure_checkpoint_status)
 
         # Continue scanning after a short delay - only in check-in modes
         in_checkin_mode = not self.is_registration_mode or self.is_checkpoint_mode
@@ -2596,7 +2609,7 @@ class NFCApp(ctk.CTk):
                 # Fill rewrite form
                 self.rewrite_id_entry.delete(0, 'end')
                 self.rewrite_id_entry.insert(0, str(guest_id))
-            elif self.is_manual_checkin_mode:
+            elif self.checkin_buttons_visible:
                 # Fill manual check-in form
                 self.manual_id_entry.delete(0, 'end')
                 self.manual_id_entry.insert(0, str(guest_id))
