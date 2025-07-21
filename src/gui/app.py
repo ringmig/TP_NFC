@@ -15,6 +15,7 @@ from PIL import Image
 import os
 import platform
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 # Configure CustomTkinter
 ctk.set_appearance_mode("dark")
@@ -25,8 +26,8 @@ class NFCApp(ctk.CTk):
     """Main application window."""
 
     # Status message constants
-    STATUS_READY_REGISTRATION = "Ready. Waiting for registration"
-    STATUS_READY_CHECKIN = "Ready. Waiting for tap"
+    STATUS_READY_REGISTRATION = "Ready to register"
+    STATUS_READY_CHECKIN = "Ready"
     STATUS_CHECKIN_PAUSED = "Check-In Paused"
 
     def __init__(self, config: dict, nfc_service, sheets_service, tag_manager, logger):
@@ -64,10 +65,21 @@ class NFCApp(ctk.CTk):
         self._active_operations = 0  # Track active operations
         self.is_refreshing = False  # Flag to prevent concurrent refreshes
         self._rewrite_check_operation_active = False  # Track rewrite countdown operation
+        self._nfc_operation_lock = False  # Global lock to prevent concurrent NFC operations
+        self._sheets_refresh_lock = threading.Lock()  # Prevent concurrent Google Sheets API calls
+        
+        # NFC connection tracking
+        self._nfc_connected = False
+        self._nfc_connection_error_logged = False
+        self._check_nfc_connection_timer = None
 
         # Tag info display state
         self.is_displaying_tag_info = False
         self.tag_info_data = None
+
+        # Thread pool management
+        self.thread_pool = ThreadPoolExecutor(max_workers=3)
+        self._shutdown_event = threading.Event()
 
         # Window setup
         self.title(config['ui']['window_title'])
@@ -96,6 +108,98 @@ class NFCApp(ctk.CTk):
 
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Start NFC connection monitoring
+        self.after(500, self.start_nfc_connection_monitoring)
+        
+        # Check initial NFC connection
+        self._nfc_connected = self.nfc_service.is_connected
+
+    def update_status(self, message: str, status_type: str = "normal"):
+        """Update status bar with message."""
+        color_map = {
+            "normal": "#ffffff",
+            "success": "#4CAF50",
+            "warning": "#ff9800",
+            "error": "#f44336",
+            "info": "#2196F3"
+        }
+        color = color_map.get(status_type, "#ffffff")
+        self.safe_update_widget(
+            'status_label',
+            lambda w, text, tc: w.configure(text=text, text_color=tc),
+            message, color
+        )
+
+    def submit_background_task(self, func, *args):
+        """Submit background task to managed pool."""
+        if not self._shutdown_event.is_set():
+            return self.thread_pool.submit(func, *args)
+
+    def on_closing(self):
+        """Handle window close event."""
+        self._shutdown_event.set()
+        self.is_scanning = False
+        if self._check_nfc_connection_timer:
+            self.after_cancel(self._check_nfc_connection_timer)
+        self.cleanup_widgets()
+        self.thread_pool.shutdown(wait=True, timeout=5)
+        self.destroy()
+        
+    def start_nfc_connection_monitoring(self):
+        """Start monitoring NFC reader connection status."""
+        self.check_nfc_connection()
+        
+    def check_nfc_connection(self):
+        """Check NFC reader connection status periodically."""
+        if self._shutdown_event.is_set():
+            return
+            
+        was_connected = self._nfc_connected
+        self._nfc_connected = self.nfc_service.is_connected
+        
+        # Connection status changed
+        if was_connected != self._nfc_connected:
+            if self._nfc_connected:
+                # Just connected
+                self.logger.info("NFC reader connected")
+                self._nfc_connection_error_logged = False
+                # Only show status if not in other operations
+                if not self.operation_in_progress:
+                    self.update_status("NFC reader connected", "success")
+                    # Clear message after 3 seconds
+                    self.after(3000, lambda: self.update_status(self.get_ready_status_message(), "normal"))
+                # Resume scanning if appropriate
+                self._resume_appropriate_scanning()
+            else:
+                # Just disconnected
+                if not self._nfc_connection_error_logged:
+                    self.logger.error("NFC reader disconnected")
+                    self._nfc_connection_error_logged = True
+                self.update_status("NFC reader not connected - please connect reader", "error")
+                # Stop all scanning
+                self.is_scanning = False
+                
+        # Schedule next check - more frequent when disconnected
+        check_interval = 2000 if self._nfc_connected else 5000  # 2s when connected, 5s when disconnected
+        self._check_nfc_connection_timer = self.after(check_interval, self.check_nfc_connection)
+        
+    def _resume_appropriate_scanning(self):
+        """Resume the appropriate scanning mode after NFC reconnection."""
+        # Don't start if in settings or operation in progress
+        if self.settings_visible or self.operation_in_progress or self.is_displaying_tag_info:
+            return
+            
+        if self.is_rewrite_mode:
+            self.start_rewrite_tag_scanning()
+        elif self.current_station == "Reception":
+            if self.is_registration_mode and not self.is_checkpoint_mode:
+                self.start_registration_tag_scanning()
+            elif self.is_checkpoint_mode:
+                self.start_checkpoint_scanning()
+        else:
+            # Non-Reception stations always use checkpoint scanning
+            self.start_checkpoint_scanning()
 
     def get_ready_status_message(self):
         """Get the appropriate ready status message based on current mode."""
@@ -314,6 +418,18 @@ class NFCApp(ctk.CTk):
 
         # Initialize content based on mode
         self.update_mode_content()
+
+    def cleanup_widgets(self):
+        """Clean up widget references to prevent memory leaks."""
+        if hasattr(self, 'guest_tree'):
+            # Clear all items before destroying
+            for item in self.guest_tree.get_children():
+                self.guest_tree.delete(item)
+
+        # Explicit cleanup of large data structures
+        self.guests_data.clear()
+        if hasattr(self, '_cached_guest_data'):
+            self._cached_guest_data.clear()
 
     def create_header(self):
         """Create header with logo and station selector."""
@@ -642,7 +758,11 @@ class NFCApp(ctk.CTk):
     def _tag_info_auto_close_countdown(self, countdown: int):
         """Auto-close countdown for tag info panel."""
         if countdown > 0 and self._tag_info_auto_close_active and self.is_displaying_tag_info:
-            self.tag_info_countdown_label.configure(text=f"Auto-close in {countdown}s")
+            self.safe_update_widget(
+                'tag_info_countdown_label',
+                lambda w, text: w.configure(text=text),
+                f"Auto-close in {countdown}s"
+            )
             self.after(1000, lambda: self._tag_info_auto_close_countdown(countdown - 1))
         elif self._tag_info_auto_close_active and self.is_displaying_tag_info:
             # Countdown reached 0 - auto close
@@ -831,10 +951,18 @@ class NFCApp(ctk.CTk):
 
     def toggle_settings(self):
         """Toggle settings panel visibility."""
+        # Block settings toggle if operation is in progress
+        if self.operation_in_progress:
+            self.update_status("Please wait for current operation to complete", "warning")
+            return
+            
         if self.settings_visible:
             self.settings_visible = False
             # Reset erase confirmation state when leaving settings
             self._reset_erase_confirmation()
+            # Clear any stale settings references
+            if hasattr(self, '_came_from_settings'):
+                delattr(self, '_came_from_settings')
             # Hide copyright
             self.copyright_label.place_forget()
             self.update_mode_content()
@@ -1005,7 +1133,7 @@ class NFCApp(ctk.CTk):
         self.guest_name_label.pack(pady=(20, 0))
 
         # Focus on entry
-        self.id_entry.focus()
+        self.safe_update_widget('id_entry', lambda w: w.focus())
 
         # Start background tag scanning for registration mode
         self.start_registration_tag_scanning()
@@ -1018,10 +1146,26 @@ class NFCApp(ctk.CTk):
 
     def _rewrite_scan_loop(self):
         """Background scanning loop for rewrite mode."""
+        # Check NFC connection first
+        if not self._nfc_connected:
+            # Retry after delay if not connected
+            self.after(1000, self._rewrite_scan_loop)
+            return
+            
+        # Check global NFC lock first
+        if self._nfc_operation_lock:
+            # Retry after delay if locked
+            self.after(500, self._rewrite_scan_loop)
+            return
+            
+        # Also check if user operation is in progress
+        if self.operation_in_progress:
+            # Retry after delay
+            self.after(500, self._rewrite_scan_loop)
+            return
+            
         if self.is_rewrite_mode and self.is_scanning:
-            thread = threading.Thread(target=self._scan_for_rewrite)
-            thread.daemon = True
-            thread.start()
+            self.submit_background_task(self._scan_for_rewrite)
 
     def _scan_for_rewrite(self):
         """Scan for tag in rewrite mode with helpful status messages."""
@@ -1073,10 +1217,20 @@ class NFCApp(ctk.CTk):
 
     def _registration_scan_loop(self):
         """Background scanning loop for registration mode."""
+        # Check NFC connection first
+        if not self._nfc_connected:
+            # Retry after delay if not connected
+            self.after(1000, self._registration_scan_loop)
+            return
+            
+        # Check global NFC lock first
+        if self._nfc_operation_lock:
+            # Retry after delay if locked
+            self.after(500, self._registration_scan_loop)
+            return
+            
         if self.is_registration_mode and not self.is_checkpoint_mode and self.is_scanning:
-            thread = threading.Thread(target=self._scan_for_registration)
-            thread.daemon = True
-            thread.start()
+            self.submit_background_task(self._scan_for_registration)
 
     def _scan_for_registration(self):
         """Scan for tag info in registration mode."""
@@ -1219,7 +1373,7 @@ class NFCApp(ctk.CTk):
         self.exit_rewrite_btn.pack(pady=(20, 0))
 
         # Focus on entry
-        self.rewrite_id_entry.focus()
+        self.safe_update_widget('rewrite_id_entry', lambda w: w.focus())
 
         # Start background tag scanning for rewrite mode
         self.start_rewrite_tag_scanning()
@@ -1233,7 +1387,7 @@ class NFCApp(ctk.CTk):
         # Waiting label
         self.checkpoint_status = ctk.CTkLabel(
             center_frame,
-            text="Waiting for tap...",
+            text="Waiting on check-in...",
             font=CTkFont(size=28, weight="bold")
         )
         self.checkpoint_status.pack()
@@ -1260,8 +1414,8 @@ class NFCApp(ctk.CTk):
         self._active_operations += 1  # Track operation start
 
         # Disable UI during operation
-        self.write_btn.configure(state="disabled")
-        self.id_entry.configure(state="disabled")
+        self.safe_update_widget('write_btn', lambda w: w.configure(state="disabled"))
+        self.safe_update_widget('id_entry', lambda w: w.configure(state="disabled"))
 
         # Show cancel button
         self.write_cancel_btn = ctk.CTkButton(
@@ -1282,9 +1436,7 @@ class NFCApp(ctk.CTk):
         self._countdown_write_band(guest_id, 10)
 
         # Start the actual write operation in background
-        thread = threading.Thread(target=self._write_to_band_thread, args=(guest_id,))
-        thread.daemon = True
-        thread.start()
+        self.submit_background_task(self._write_to_band_thread, guest_id)
 
     def cancel_write(self):
         """Cancel write operation."""
@@ -1296,10 +1448,14 @@ class NFCApp(ctk.CTk):
 
     def _cleanup_write_ui(self):
         """Clean up write operation UI."""
-        self.write_btn.configure(state="normal")
-        self.id_entry.configure(state="normal")
-        if hasattr(self, 'write_cancel_btn'):
-            self.write_cancel_btn.destroy()
+        self.safe_update_widget('write_btn', lambda w: w.configure(state="normal"))
+        self.safe_update_widget('id_entry', lambda w: w.configure(state="normal"))
+        if hasattr(self, 'write_cancel_btn') and self.write_cancel_btn:
+            try:
+                if self.write_cancel_btn.winfo_exists():
+                    self.write_cancel_btn.destroy()
+            except Exception:
+                pass
             delattr(self, 'write_cancel_btn')
 
     def _countdown_write_band(self, guest_id: int, countdown: int):
@@ -1342,7 +1498,11 @@ class NFCApp(ctk.CTk):
 
         if result:
             self.update_status(f"✓ Registered to {result['guest_name']}", "success")
-            self.guest_name_label.configure(text=result['guest_name'])
+            self.safe_update_widget(
+                'guest_name_label',
+                lambda w, text: w.configure(text=text),
+                result['guest_name']
+            )
 
             # Clear form after delay
             self.after(2000, self.clear_registration_form)
@@ -1356,8 +1516,8 @@ class NFCApp(ctk.CTk):
 
     def clear_registration_form(self):
         """Clear the registration form."""
-        self.id_entry.delete(0, 'end')
-        self.guest_name_label.configure(text="")
+        self.safe_update_widget('id_entry', lambda w: w.delete(0, 'end'))
+        self.safe_update_widget('guest_name_label', lambda w: w.configure(text=""))
         # Show appropriate status based on mode
         if self.is_rewrite_mode:
             self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
@@ -1401,6 +1561,20 @@ class NFCApp(ctk.CTk):
         # 1. Always scan in checkpoint mode (non-reception stations)
         # 2. Only scan at Reception if in checkpoint mode (not registration mode)
         # 3. Allow scanning during tag info display if in check-in mode
+        # 4. NEVER scan if global NFC operation lock is active
+        # 5. NEVER scan if NFC reader is not connected
+
+        # Check NFC connection first
+        if not self._nfc_connected:
+            # Retry after delay if not connected
+            self.after(1000, self._checkpoint_scan_loop)
+            return
+
+        # Check global NFC lock first
+        if self._nfc_operation_lock:
+            # Retry after delay if locked
+            self.after(500, self._checkpoint_scan_loop)
+            return
 
         in_checkin_mode = not self.is_registration_mode or self.is_checkpoint_mode
         allow_during_tag_info = self.is_displaying_tag_info and in_checkin_mode
@@ -1410,9 +1584,7 @@ class NFCApp(ctk.CTk):
         if should_scan and not self._scanning_thread_active:
             # Start scan in thread
             self._scanning_thread_active = True
-            thread = threading.Thread(target=self._scan_for_checkin)
-            thread.daemon = True
-            thread.start()
+            self.submit_background_task(self._scan_for_checkin)
 
     def _scan_for_checkin(self):
         """Scan for check-in (thread function)."""
@@ -1538,39 +1710,68 @@ class NFCApp(ctk.CTk):
             self.logger.debug("Restarting scanning after error")
             self._checkpoint_scan_loop()
 
+    def safe_update_widget(self, widget_attr: str, update_func, *args, **kwargs):
+        """Safely update any widget with existence check.
+        
+        Args:
+            widget_attr: Name of widget attribute
+            update_func: Function to call for update (receives widget as first arg)
+            *args, **kwargs: Additional arguments for update function
+        """
+        try:
+            widget = getattr(self, widget_attr, None)
+            if widget and hasattr(widget, 'winfo_exists') and widget.winfo_exists():
+                update_func(widget, *args, **kwargs)
+        except Exception as e:
+            self.logger.debug(f"Widget {widget_attr} update failed: {e}")
+    
     def _safe_configure_checkpoint_status(self):
         """Safely configure checkpoint status widget if it exists."""
-        try:
-            if hasattr(self, 'checkpoint_status') and self.checkpoint_status.winfo_exists():
-                self.checkpoint_status.configure(
-                    text="Waiting for tap...",
-                    text_color="#ffffff"
-                )
-        except Exception as e:
-            self.logger.debug(f"Checkpoint status widget not available: {e}")
+        self.safe_update_widget(
+            'checkpoint_status',
+            lambda w: w.configure(text="Waiting for tap...", text_color="#ffffff")
+        )
 
     def _checkin_complete(self, result: Optional[Dict]):
         """Handle check-in completion."""
+        # Mark operation in progress to block station transitions
+        self.operation_in_progress = True
+        self._active_operations += 1
+        
         if result:
-            self.checkpoint_status.configure(
-                text=f"✓ {result['guest_name']} checked in at {result['timestamp']}",
-                text_color="#4CAF50"
+            self.safe_update_widget(
+                'checkpoint_status',
+                lambda w, text, tc: w.configure(text=text, text_color=tc),
+                f"✓ {result['guest_name']} checked in at {result['timestamp']}",
+                "#4CAF50"
             )
             self.update_status(f"Checked in: {result['guest_name']}", "success")
 
             # Delay refresh to ensure status is visible and sync has time to complete
-            self.after(3000, lambda: self.refresh_guest_data(False))
+            self.after(3000, lambda: self._checkin_processing_complete(True))
 
             # Reset after delay with safety check
             self.after(3000, self._safe_configure_checkpoint_status)
-
-        # Continue scanning after a short delay - only in check-in modes
+        else:
+            # No result - immediately complete the operation
+            self._checkin_processing_complete(False)
+            
+    def _checkin_processing_complete(self, refresh_needed: bool):
+        """Complete check-in processing and release operation lock."""
+        # Release operation lock
+        self.operation_in_progress = False
+        self._active_operations -= 1
+        
+        if refresh_needed:
+            self.refresh_guest_data(False)
+            
+        # Continue scanning after processing is complete
         in_checkin_mode = not self.is_registration_mode or self.is_checkpoint_mode
         allow_during_tag_info = self.is_displaying_tag_info and (self.is_checkpoint_mode or not self.is_registration_mode)
 
         should_continue = (self.is_scanning and in_checkin_mode) or allow_during_tag_info
         if should_continue:
-            self.after(1000, self._checkpoint_scan_loop)
+            self.after(100, self._checkpoint_scan_loop)
 
     def erase_tag_settings(self):
         """Erase tag functionality from settings panel with two-step confirmation."""
@@ -1589,6 +1790,16 @@ class NFCApp(ctk.CTk):
         # Second click - proceed with erase
         self._reset_erase_confirmation()
 
+        # Check NFC connection first
+        if not self._nfc_connected:
+            self.update_status("NFC reader not connected - please connect reader", "error")
+            return
+            
+        # Check if another NFC operation is already in progress
+        if self._nfc_operation_lock:
+            self.update_status("Another NFC operation is in progress...", "warning")
+            return
+
         # Stop ALL background scanning and cancel any ongoing NFC operations
         self.is_scanning = False
         try:
@@ -1596,11 +1807,14 @@ class NFCApp(ctk.CTk):
         except Exception as e:
             self.logger.warning(f"Error cancelling NFC read before erase: {e}")
 
+        # Set global NFC lock before marking operation in progress
+        self._nfc_operation_lock = True
+        
         # Mark operation in progress to block other operations
         self.operation_in_progress = True
 
         # Disable button during operation
-        self.settings_erase_btn.configure(state="disabled")
+        self.safe_update_widget('settings_erase_btn', lambda w: w.configure(state="disabled"))
 
         # Create cancel button underneath
         self.erase_cancel_btn = ctk.CTkButton(
@@ -1620,25 +1834,27 @@ class NFCApp(ctk.CTk):
         self._erase_operation_active = True
         self._countdown_erase_settings(10)
 
-        thread = threading.Thread(target=self._erase_tag_thread_settings)
-        thread.daemon = True
-        thread.start()
+        self.submit_background_task(self._erase_tag_thread_settings)
 
     def _reset_erase_confirmation(self):
         """Reset erase button to normal state."""
         if self.erase_confirmation_state:
             self.erase_confirmation_state = False
-            if hasattr(self, 'settings_erase_btn'):
-                self.settings_erase_btn.configure(
+            self.safe_update_widget(
+                'settings_erase_btn',
+                lambda w: w.configure(
                     text="Erase Tag",
                     fg_color="#dc3545",
                     hover_color="#c82333"
                 )
+            )
 
     def cancel_erase_settings(self):
         """Cancel erase operation from settings."""
         self._erase_operation_active = False
         self.operation_in_progress = False
+        # Release global NFC lock
+        self._nfc_operation_lock = False
         self.nfc_service.cancel_read()
 
         # Set appropriate status based on mode context
@@ -1664,9 +1880,13 @@ class NFCApp(ctk.CTk):
         """Clean up erase UI in settings."""
         # Reset confirmation state
         self._reset_erase_confirmation()
-        self.settings_erase_btn.configure(state="normal")
-        if hasattr(self, 'erase_cancel_btn'):
-            self.erase_cancel_btn.destroy()
+        self.safe_update_widget('settings_erase_btn', lambda w: w.configure(state="normal"))
+        if hasattr(self, 'erase_cancel_btn') and self.erase_cancel_btn:
+            try:
+                if self.erase_cancel_btn.winfo_exists():
+                    self.erase_cancel_btn.destroy()
+            except Exception:
+                pass
             delattr(self, 'erase_cancel_btn')
 
     def _countdown_erase_settings(self, countdown: int):
@@ -1676,6 +1896,8 @@ class NFCApp(ctk.CTk):
             self.after(1000, lambda: self._countdown_erase_settings(countdown - 1))
         elif self._erase_operation_active:
             self._erase_operation_active = False
+            # Release global NFC lock on timeout
+            self._nfc_operation_lock = False
             self.update_status("No tag detected", "error")
             self._erase_complete_settings(None)
 
@@ -1686,6 +1908,8 @@ class NFCApp(ctk.CTk):
 
             # Always stop countdown when thread completes
             self._erase_operation_active = False
+            # Release global NFC lock when thread completes
+            self._nfc_operation_lock = False
 
             if tag:
                 result = self.tag_manager.clear_tag(tag.uid)
@@ -1697,6 +1921,8 @@ class NFCApp(ctk.CTk):
         except Exception as e:
             # Stop countdown on error
             self._erase_operation_active = False
+            # Release global NFC lock on error
+            self._nfc_operation_lock = False
             self.logger.error(f"Erase operation error: {e}")
             self.after(0, self._erase_complete_settings, None)
 
@@ -1719,6 +1945,16 @@ class NFCApp(ctk.CTk):
 
     def tag_info(self):
         """Show tag information functionality."""
+        # Check NFC connection first
+        if not self._nfc_connected:
+            self.update_status("NFC reader not connected - please connect reader", "error")
+            return
+            
+        # Check if another NFC operation is already in progress
+        if self._nfc_operation_lock:
+            self.update_status("Another NFC operation is in progress...", "warning")
+            return
+
         # Immediately stop all background scanning
         self.is_scanning = False
 
@@ -1738,12 +1974,15 @@ class NFCApp(ctk.CTk):
         if self.settings_visible:
             self._came_from_settings = True
 
+        # Set global NFC lock before marking operation in progress
+        self._nfc_operation_lock = True
+        
         # Mark operation in progress
         self.operation_in_progress = True
         self._active_operations += 1
 
         # Disable button during operation
-        self.tag_info_btn.configure(state="disabled")
+        self.safe_update_widget('tag_info_btn', lambda w: w.configure(state="disabled"))
 
         # Create cancel button
         self.tag_info_cancel_btn = ctk.CTkButton(
@@ -1763,15 +2002,16 @@ class NFCApp(ctk.CTk):
         self._tag_info_operation_active = True
         self._countdown_tag_info(10)
 
-        thread = threading.Thread(target=self._tag_info_thread)
-        thread.daemon = True
-        thread.start()
+        self.submit_background_task(self._tag_info_thread)
 
     def cancel_tag_info(self):
         """Cancel tag info operation."""
         self._tag_info_operation_active = False
         self.operation_in_progress = False
         self._active_operations -= 1
+        
+        # Release global NFC lock
+        self._nfc_operation_lock = False
 
         # Cancel NFC read safely
         try:
@@ -1785,13 +2025,14 @@ class NFCApp(ctk.CTk):
 
     def _cleanup_tag_info(self):
         """Clean up tag info UI."""
-        try:
-            self.tag_info_btn.configure(state="normal")
-            if hasattr(self, 'tag_info_cancel_btn'):
-                self.tag_info_cancel_btn.destroy()
-                delattr(self, 'tag_info_cancel_btn')
-        except Exception as e:
-            self.logger.warning(f"Error cleaning up tag info UI: {e}")
+        self.safe_update_widget('tag_info_btn', lambda w: w.configure(state="normal"))
+        if hasattr(self, 'tag_info_cancel_btn') and self.tag_info_cancel_btn:
+            try:
+                if self.tag_info_cancel_btn.winfo_exists():
+                    self.tag_info_cancel_btn.destroy()
+            except Exception:
+                pass
+            delattr(self, 'tag_info_cancel_btn')
 
     def _countdown_tag_info(self, countdown: int):
         """Countdown for tag info."""
@@ -1803,6 +2044,8 @@ class NFCApp(ctk.CTk):
             self._tag_info_operation_active = False
             self.operation_in_progress = False
             self._active_operations -= 1
+            # Release global NFC lock
+            self._nfc_operation_lock = False
             self.update_status("No tag detected", "error")
             self._cleanup_tag_info()
 
@@ -1819,6 +2062,8 @@ class NFCApp(ctk.CTk):
             self._tag_info_operation_active = False
             self.operation_in_progress = False
             self._active_operations -= 1
+            # Release global NFC lock
+            self._nfc_operation_lock = False
 
             if tag:
                 info = self.tag_manager.get_tag_info(tag.uid)
@@ -1834,6 +2079,8 @@ class NFCApp(ctk.CTk):
                 self._tag_info_operation_active = False
                 self.operation_in_progress = False
                 self._active_operations -= 1
+                # Release global NFC lock on error
+                self._nfc_operation_lock = False
                 self.after(0, self.update_status, "Tag read error", "error")
                 self.after(0, self._cleanup_tag_info)
 
@@ -2135,9 +2382,7 @@ class NFCApp(ctk.CTk):
         self.update_status("Clearing all data...", "warning")
 
         # Run in thread to avoid blocking UI
-        thread = threading.Thread(target=self._clear_all_data_thread)
-        thread.daemon = True
-        thread.start()
+        self.submit_background_task(self._clear_all_data_thread)
 
     def _clear_all_data_thread(self):
         """Thread function to clear all data."""
@@ -2161,6 +2406,11 @@ class NFCApp(ctk.CTk):
 
     def rewrite_tag(self):
         """Enter rewrite tag mode."""
+        # Check NFC connection first
+        if not self._nfc_connected:
+            self.update_status("NFC reader not connected - please connect reader", "error")
+            return
+            
         # Stop any background scanning to prevent NFC conflicts
         self.is_scanning = False
 
@@ -2176,6 +2426,15 @@ class NFCApp(ctk.CTk):
 
     def on_station_button_click(self, station: str):
         """Handle station button click."""
+        # Ignore if clicking current station
+        if station == self.current_station:
+            return
+            
+        # Block station changes if operation is in progress
+        if self.operation_in_progress:
+            self.update_status("Please wait for current operation to complete", "warning")
+            return
+            
         # Exit rewrite mode if active and cancel any operations
         if self.is_rewrite_mode:
             self.cancel_any_rewrite_operations()
@@ -2211,7 +2470,10 @@ class NFCApp(ctk.CTk):
             self.after(500, self.start_checkpoint_scanning)
 
         # Auto-refresh guest list to show station-specific check-ins
-        self.refresh_guest_data(user_initiated=False)
+        # Add delay to prevent rapid refresh on fast switching
+        if hasattr(self, '_station_switch_timer'):
+            self.after_cancel(self._station_switch_timer)
+        self._station_switch_timer = self.after(300, lambda: self.refresh_guest_data(user_initiated=False))
 
     def update_station_buttons(self):
         """Update station button styling to highlight current selection."""
@@ -2283,9 +2545,7 @@ class NFCApp(ctk.CTk):
         self.is_refreshing = True
 
         # Run refresh in background thread
-        thread = threading.Thread(target=self._background_refresh_thread)
-        thread.daemon = True
-        thread.start()
+        self.submit_background_task(self._background_refresh_thread)
 
     def _background_refresh_thread(self):
         """Background thread for refreshing guest data."""
@@ -2307,7 +2567,11 @@ class NFCApp(ctk.CTk):
             "error": "#f44336"
         }
         color = color_map.get(status_type, "#4CAF50")
-        self.sync_status_label.configure(text=message, text_color=color)
+        self.safe_update_widget(
+            'sync_status_label',
+            lambda w, text, tc: w.configure(text=text, text_color=tc),
+            message, color
+        )
 
     def update_status_respecting_settings_mode(self, message: str, status_type: str = "normal"):
         """Update status while respecting registration mode in settings."""
@@ -2370,6 +2634,12 @@ class NFCApp(ctk.CTk):
 
     def refresh_guest_data(self, user_initiated=True):
         """Refresh guest data from Google Sheets."""
+        # Skip if already refreshing
+        if not self._sheets_refresh_lock.acquire(blocking=False):
+            if user_initiated:
+                self.update_status("Refresh already in progress", "warning")
+            return
+            
         # Show status message only for user-initiated refreshes
         if user_initiated:
             if self.settings_visible:
@@ -2382,9 +2652,7 @@ class NFCApp(ctk.CTk):
         self._is_user_initiated_refresh = user_initiated
 
         # Run in thread
-        thread = threading.Thread(target=self._refresh_guest_data_thread)
-        thread.daemon = True
-        thread.start()
+        self.submit_background_task(self._refresh_guest_data_thread)
 
     def _refresh_guest_data_thread(self):
         """Thread function for refreshing data."""
@@ -2401,6 +2669,9 @@ class NFCApp(ctk.CTk):
             # Only show cached data message for user-initiated refreshes, not automatic ones
             if hasattr(self, '_is_user_initiated_refresh') and self._is_user_initiated_refresh:
                 self.after(0, self.update_sync_status, "Using cached data (Google Sheets offline)", "warning")
+        finally:
+            # Always release the refresh lock
+            self._sheets_refresh_lock.release()
 
     def _update_guest_table(self, guests: List):
         """Update the guest table with new data."""
@@ -2649,6 +2920,11 @@ class NFCApp(ctk.CTk):
 
     def rewrite_to_band(self):
         """Handle rewrite to band action."""
+        # Block if another operation is in progress
+        if self.operation_in_progress:
+            self.update_status("Please wait for current operation to complete", "warning")
+            return
+            
         guest_id = self.rewrite_id_entry.get().strip()
 
         if not guest_id:
@@ -2660,11 +2936,15 @@ class NFCApp(ctk.CTk):
         except ValueError:
             self.update_status("Invalid ID format", "error")
             return
+            
+        # Mark operation in progress to block background scanning
+        self.operation_in_progress = True
+        self._active_operations += 1
 
         # Disable UI during tag check
-        self.rewrite_btn.configure(state="disabled")
-        self.rewrite_id_entry.configure(state="disabled")
-        self.exit_rewrite_btn.configure(state="disabled")
+        self.safe_update_widget('rewrite_btn', lambda w: w.configure(state="disabled"))
+        self.safe_update_widget('rewrite_id_entry', lambda w: w.configure(state="disabled"))
+        self.safe_update_widget('exit_rewrite_btn', lambda w: w.configure(state="disabled"))
 
         # Cancel any ongoing NFC operations to prevent conflicts
         try:
@@ -2704,6 +2984,8 @@ class NFCApp(ctk.CTk):
             if not tag:
                 self.after(0, self._enable_rewrite_ui)
                 self.after(0, self.update_status, "No tag detected", "error")
+                # Release operation lock on failure
+                self.after(0, self._release_rewrite_lock)
                 return
 
             # Check if tag is registered
@@ -2719,6 +3001,7 @@ class NFCApp(ctk.CTk):
                     guest_name = current_guest.full_name if current_guest else f"Guest ID {current_guest_id}"
                     self.after(0, self._enable_rewrite_ui)
                     self.after(0, self.update_status, f"Tag already registered to {guest_name}", "warning")
+                    self.after(0, self._release_rewrite_lock)
                     return
 
                 # Different guest - show confirmation dialog
@@ -2740,6 +3023,7 @@ class NFCApp(ctk.CTk):
             self._rewrite_check_operation_active = False
             self.after(0, self._enable_rewrite_ui)
             self.after(0, self.update_status, "Error reading tag", "error")
+            self.after(0, self._release_rewrite_lock)
 
     def _show_rewrite_confirmation(self, current_name: str, new_name: str, guest_id: int, tag):
         """Show confirmation dialog for rewriting a registered tag."""
@@ -2833,6 +3117,8 @@ class NFCApp(ctk.CTk):
             confirm_window.destroy()
             # Clear the guest ID field
             self.rewrite_id_entry.delete(0, 'end')
+            # Release operation lock on cancel
+            self._release_rewrite_lock()
 
         cancel_btn = ctk.CTkButton(
             button_frame,
@@ -2911,7 +3197,7 @@ class NFCApp(ctk.CTk):
 
     def clear_rewrite_form(self):
         """Clear the rewrite form."""
-        self.rewrite_id_entry.delete(0, 'end')
+        self.safe_update_widget('rewrite_id_entry', lambda w: w.delete(0, 'end'))
         self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
 
     def _enable_rewrite_ui(self):
@@ -2919,12 +3205,14 @@ class NFCApp(ctk.CTk):
         # Reset countdown operation flag
         self._rewrite_check_operation_active = False
 
-        if hasattr(self, 'rewrite_btn'):
-            self.rewrite_btn.configure(state="normal")
-        if hasattr(self, 'rewrite_id_entry'):
-            self.rewrite_id_entry.configure(state="normal")
-        if hasattr(self, 'exit_rewrite_btn'):
-            self.exit_rewrite_btn.configure(state="normal")
+        self.safe_update_widget('rewrite_btn', lambda w: w.configure(state="normal"))
+        self.safe_update_widget('rewrite_id_entry', lambda w: w.configure(state="normal"))
+        self.safe_update_widget('exit_rewrite_btn', lambda w: w.configure(state="normal"))
+            
+    def _release_rewrite_lock(self):
+        """Release the rewrite operation lock."""
+        self.operation_in_progress = False
+        self._active_operations -= 1
 
     def on_tree_motion(self, event):
         """Handle mouse motion over tree for cursor changes and hover styling."""
@@ -2992,9 +3280,18 @@ class NFCApp(ctk.CTk):
 
     def quick_checkin(self, guest_id, station=None):
         """Perform quick check-in for a guest at specific station."""
+        # Block if another operation is in progress
+        if self.operation_in_progress:
+            self.update_status("Please wait for current operation to complete", "warning")
+            return
+            
         if station is None:
             station = self.current_station
 
+        # Mark operation in progress
+        self.operation_in_progress = True
+        self._active_operations += 1
+        
         # Update status
         self.update_status(f"Checking in guest {guest_id} at {station}...", "info")
 
@@ -3019,6 +3316,10 @@ class NFCApp(ctk.CTk):
         except Exception as e:
             self.logger.error(f"Manual check-in error: {e}")
             self.after(0, self.update_status, f"Check-in failed: {str(e)}", "error")
+        finally:
+            # Always release operation lock
+            self.operation_in_progress = False
+            self._active_operations -= 1
 
     def _force_sync_on_startup(self):
         """Force sync of pending items found at startup."""
@@ -3046,7 +3347,11 @@ class NFCApp(ctk.CTk):
             "info": "#2196F3"
         }
         color = color_map.get(status_type, "#ffffff")
-        self.status_label.configure(text=message, text_color=color)
+        self.safe_update_widget(
+            'status_label',
+            lambda w, text, tc: w.configure(text=text, text_color=tc),
+            message, color
+        )
 
         # Auto-clear all messages after 2 seconds (except empty messages)
         if auto_clear and message and message.strip():
@@ -3082,6 +3387,8 @@ class NFCApp(ctk.CTk):
     def on_closing(self):
         """Handle window closing."""
         self.is_scanning = False
+        # Release any global locks
+        self._nfc_operation_lock = False
         if self.nfc_service:
             self.nfc_service.disconnect()
         self.destroy()

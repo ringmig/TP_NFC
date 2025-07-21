@@ -88,31 +88,7 @@ threading_patterns:
       - main_thread_scheduling: "self.after() for all UI updates from threads"
       - safe_widget_access: "_safe_configure_*() methods with existence checks"
       - widget_cleanup: "Proper destruction order and reference clearing"
-
-critical_synchronization_points:
-  potential_race_conditions:
-    - station_switching_during_operations: "Must complete or cancel active operations"
-    - settings_access_during_scanning: "Background scanning continues in checkpoint modes"
-    - rapid_button_clicks: "Operation flags prevent duplicate operations"
-    - widget_updates_after_destruction: "Safe update patterns prevent crashes"
-    
-  confirmed_race_condition_vulnerabilities:
-    - reception_checkpoint_processing: "ISSUE: Tag processing allows transitions mid-operation, no operation_in_progress blocking"
-    - other_stations_processing: "ISSUE: Same as reception - check-in processing doesn't block transitions"
-    - concurrent_nfc_operations: "ISSUE: Tag Info/Erase can run while background checkpoint scanning active"
-    - rewrite_background_vs_button: "ISSUE: Background rewrite scanning + user button operation potential conflict"
-    - tag_info_dual_scanning: "ISSUE: Tag Info allows checkpoint scanning = two NFC operations simultaneously"
-    - manual_checkin_concurrency: "ISSUE: Quick guest list check-in doesn't set operation_in_progress"
-    - state_restoration_corruption: "ISSUE: Rapid Settings→Station→Settings could corrupt _came_from_settings flag"
-    
-  edge_cases_to_test:
-    - reception_mode_rapid_toggle: "Registration <-> Checkpoint switching"
-    - settings_during_background_scan: "Overlay without stopping background"
-    - network_failure_during_operations: "Graceful degradation required"
-    - nfc_reader_disconnect: "Connection loss during active operations"
-    - rapid_transitions: "Settings → Station → Settings → Rewrite chains"
-    - dual_nfc_reader_conflict: "Multiple scanning operations to same hardware"
-
+  
 state_restoration_logic:
   settings_panel:
     mechanism: "Remember previous station and mode for return"
