@@ -36,13 +36,13 @@ log_level = 2
 [android]
 
 # (int) Target Android API, should be as high as possible.
-android.api = 28
+android.api = 30
 
 # (int) Minimum API your APK will support.
 android.minapi = 21
 
 # (int) Android SDK version to use
-android.sdk = 28
+android.sdk = 30
 
 # (str) Android NDK version to use
 android.ndk = 19b
