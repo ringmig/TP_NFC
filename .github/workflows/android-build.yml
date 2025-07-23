@@ -168,28 +168,33 @@ jobs:
             
             echo 'Running buildozer...'
             buildozer android debug --verbose
-          " 2>&1 | tee build.log || {
-            echo "Buildozer Docker build failed! See build.log for details."
-            if [ -f build.log ]; then
-              echo "Last 500 lines of build.log:"
-              tail -500 build.log
-            else
-              echo "build.log file not found"
-            fi
-            exit 1
-          }
+            
+            echo 'Build completed. Checking for APK in bin directory...'
+            ls -la bin/ || echo 'No bin directory found'
+            find . -name '*.apk' -type f
+          " 2>&1 | tee build.log
           
-        echo "Buildozer Docker build completed. Searching for APK..."
+        # Check if build succeeded
+        BUILD_EXIT_CODE=$?
+        if [ $BUILD_EXIT_CODE -ne 0 ]; then
+          echo "❌ Buildozer build failed with exit code $BUILD_EXIT_CODE"
+          echo "Last 100 lines of build.log:"
+          tail -100 build.log
+          exit 1
+        fi
         
-        # Debug: List all files to see what was created
-        echo "Files in current directory:"
+        echo "✅ Buildozer Docker build completed successfully!"
+        
+        # APK should now be in the bin directory on the host
+        echo "Searching for APK files in current directory:"
         ls -la
-        echo "Searching for APK files..."
+        echo "Checking bin directory:"
+        ls -la bin/ || echo "No bin directory found"
+        echo "Searching for all APK files:"
         find . -name "*.apk" -type f
         
-        # Search for APK files. Buildozer places them in bin/ after successful build
-        # The log shows: APK testapp-0.1-arm64-v8a_armeabi-v7a-debug.apk available in the bin directory
-        APK_FILE=$(find . -name "*testapp*.apk" -o -name "*.apk" | head -1)
+        # Search for APK files
+        APK_FILE=$(find . -name "*.apk" -type f | head -1)
         
         if [ -n "$APK_FILE" ]; then
           echo "✅ Found APK: $APK_FILE"
