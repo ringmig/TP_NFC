@@ -1,41 +1,41 @@
-﻿2025-07-23T19:46:44.3525062Z ##[group]Run echo "Preparing buildozer.spec for Docker environment..."
-2025-07-23T19:46:44.3525713Z [36;1mecho "Preparing buildozer.spec for Docker environment..."[0m
-2025-07-23T19:46:44.3526089Z [36;1m[0m
-2025-07-23T19:46:44.3526341Z [36;1m# Ensure correct settings for buildozer.[0m
-2025-07-23T19:46:44.3526859Z [36;1m# The Docker image handles SDK/NDK installation, but buildozer.spec still needs target versions.[0m
-2025-07-23T19:46:44.3527433Z [36;1m# We'll stick to widely compatible versions for the pre-built image.[0m
-2025-07-23T19:46:44.3528313Z [36;1msed -i 's/^android\.api = .*/android.api = 30/' buildozer.spec[0m
-2025-07-23T19:46:44.3528764Z [36;1msed -i 's/^android\.ndk = .*/android.ndk = 25b/' buildozer.spec  [0m
-2025-07-23T19:46:44.3529219Z [36;1msed -i 's/^android\.minapi = .*/android.minapi = 21/' buildozer.spec[0m
-2025-07-23T19:46:44.3529665Z [36;1msed -i 's/^android\.sdk = .*/android.sdk = 30/' buildozer.spec[0m
-2025-07-23T19:46:44.3530173Z [36;1m# The build-tools version might be managed by the Docker image, but setting it explicitly[0m
-2025-07-23T19:46:44.3530777Z [36;1m# in spec can help if buildozer tries to verify it. Use 30.0.3, a common stable one.[0m
-2025-07-23T19:46:44.3531326Z [36;1msed -i 's/^android\.build_tools = .*/android.build_tools = 30.0.3/' buildozer.spec[0m
-2025-07-23T19:46:44.3531932Z [36;1msed -i 's/^android\.archs = .*/android.archs = armeabi-v7a/' buildozer.spec # Single arch for simplicity[0m
-2025-07-23T19:46:44.3532383Z [36;1m[0m
-2025-07-23T19:46:44.3532621Z [36;1m# Use stable Kivy version[0m
-2025-07-23T19:46:44.3533043Z [36;1msed -i 's/^requirements = .*/requirements = python3,kivy==2.1.0/' buildozer.spec[0m
-2025-07-23T19:46:44.3533452Z [36;1m[0m
-2025-07-23T19:46:44.3533692Z [36;1m# Enable AndroidX for modern Android builds[0m
-2025-07-23T19:46:44.3534080Z [36;1mif ! grep -q "android.enable_androidx" buildozer.spec; then[0m
-2025-07-23T19:46:44.3534506Z [36;1m  echo "android.enable_androidx = True" >> buildozer.spec[0m
-2025-07-23T19:46:44.3534835Z [36;1melse[0m
-2025-07-23T19:46:44.3535197Z [36;1m  sed -i 's/^android\.enable_androidx = .*/android.enable_androidx = True/' buildozer.spec[0m
-2025-07-23T19:46:44.3535596Z [36;1mfi[0m
-2025-07-23T19:46:44.3535794Z [36;1m[0m
-2025-07-23T19:46:44.3536034Z [36;1mecho "Final buildozer.spec configuration:"[0m
-2025-07-23T19:46:44.3536537Z [36;1mgrep -E "android\.(api|sdk|ndk|minapi|archs|build_tools|enable_androidx)|requirements" buildozer.spec[0m
-2025-07-23T19:46:44.3569052Z shell: /usr/bin/bash -e {0}
-2025-07-23T19:46:44.3569394Z ##[endgroup]
-2025-07-23T19:46:44.3632637Z Preparing buildozer.spec for Docker environment...
-2025-07-23T19:46:44.3764996Z Final buildozer.spec configuration:
-2025-07-23T19:46:44.3777432Z # (list) Application requirements
-2025-07-23T19:46:44.3778296Z # comma separated e.g. requirements = sqlite3,kivy
-2025-07-23T19:46:44.3778913Z requirements = python3,kivy==2.1.0
-2025-07-23T19:46:44.3779444Z android.api = 30
-2025-07-23T19:46:44.3779853Z android.minapi = 21
-2025-07-23T19:46:44.3780280Z android.sdk = 30
-2025-07-23T19:46:44.3780681Z android.ndk = 25b
-2025-07-23T19:46:44.3781083Z android.build_tools = 30.0.3
-2025-07-23T19:46:44.3781750Z android.archs = armeabi-v7a
-2025-07-23T19:46:44.3782246Z android.enable_androidx = True
+﻿2025-07-23T20:48:06.6975086Z ##[group]Run echo "Preparing buildozer.spec for Docker environment..."
+2025-07-23T20:48:06.6975774Z [36;1mecho "Preparing buildozer.spec for Docker environment..."[0m
+2025-07-23T20:48:06.6976171Z [36;1m[0m
+2025-07-23T20:48:06.6976433Z [36;1m# Ensure correct settings for buildozer.[0m
+2025-07-23T20:48:06.6976941Z [36;1m# The Docker image handles SDK/NDK installation, but buildozer.spec still needs target versions.[0m
+2025-07-23T20:48:06.6977497Z [36;1m# We'll stick to widely compatible versions for the pre-built image.[0m
+2025-07-23T20:48:06.6978178Z [36;1msed -i 's/^android\.api = .*/android.api = 30/' buildozer.spec[0m
+2025-07-23T20:48:06.6978630Z [36;1msed -i 's/^android\.ndk = .*/android.ndk = 25b/' buildozer.spec  [0m
+2025-07-23T20:48:06.6979082Z [36;1msed -i 's/^android\.minapi = .*/android.minapi = 21/' buildozer.spec[0m
+2025-07-23T20:48:06.6979534Z [36;1msed -i 's/^android\.sdk = .*/android.sdk = 30/' buildozer.spec[0m
+2025-07-23T20:48:06.6980039Z [36;1m# The build-tools version might be managed by the Docker image, but setting it explicitly[0m
+2025-07-23T20:48:06.6980631Z [36;1m# in spec can help if buildozer tries to verify it. Use 30.0.3, a common stable one.[0m
+2025-07-23T20:48:06.6981169Z [36;1msed -i 's/^android\.build_tools = .*/android.build_tools = 30.0.3/' buildozer.spec[0m
+2025-07-23T20:48:06.6981771Z [36;1msed -i 's/^android\.archs = .*/android.archs = armeabi-v7a/' buildozer.spec # Single arch for simplicity[0m
+2025-07-23T20:48:06.6982233Z [36;1m[0m
+2025-07-23T20:48:06.6982618Z [36;1m# Use stable Kivy version[0m
+2025-07-23T20:48:06.6983047Z [36;1msed -i 's/^requirements = .*/requirements = python3,kivy==2.1.0/' buildozer.spec[0m
+2025-07-23T20:48:06.6983469Z [36;1m[0m
+2025-07-23T20:48:06.6983717Z [36;1m# Enable AndroidX for modern Android builds[0m
+2025-07-23T20:48:06.6984118Z [36;1mif ! grep -q "android.enable_androidx" buildozer.spec; then[0m
+2025-07-23T20:48:06.6984544Z [36;1m  echo "android.enable_androidx = True" >> buildozer.spec[0m
+2025-07-23T20:48:06.6984885Z [36;1melse[0m
+2025-07-23T20:48:06.6985248Z [36;1m  sed -i 's/^android\.enable_androidx = .*/android.enable_androidx = True/' buildozer.spec[0m
+2025-07-23T20:48:06.6985657Z [36;1mfi[0m
+2025-07-23T20:48:06.6985861Z [36;1m[0m
+2025-07-23T20:48:06.6986107Z [36;1mecho "Final buildozer.spec configuration:"[0m
+2025-07-23T20:48:06.6986617Z [36;1mgrep -E "android\.(api|sdk|ndk|minapi|archs|build_tools|enable_androidx)|requirements" buildozer.spec[0m
+2025-07-23T20:48:06.7018329Z shell: /usr/bin/bash -e {0}
+2025-07-23T20:48:06.7018676Z ##[endgroup]
+2025-07-23T20:48:06.7086475Z Preparing buildozer.spec for Docker environment...
+2025-07-23T20:48:06.7220276Z Final buildozer.spec configuration:
+2025-07-23T20:48:06.7232820Z # (list) Application requirements
+2025-07-23T20:48:06.7233422Z # comma separated e.g. requirements = sqlite3,kivy
+2025-07-23T20:48:06.7233797Z requirements = python3,kivy==2.1.0
+2025-07-23T20:48:06.7234087Z android.api = 30
+2025-07-23T20:48:06.7234322Z android.minapi = 21
+2025-07-23T20:48:06.7234596Z android.sdk = 30
+2025-07-23T20:48:06.7234821Z android.ndk = 25b
+2025-07-23T20:48:06.7235064Z android.build_tools = 30.0.3
+2025-07-23T20:48:06.7235336Z android.archs = armeabi-v7a
+2025-07-23T20:48:06.7235726Z android.enable_androidx = True

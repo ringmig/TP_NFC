@@ -223,4 +223,4 @@ jobs:
       with:
         name: android-apk-testapp-docker
         path: Android/bin/testapp-0.1-arm64-v8a_armeabi-v7a-debug.apk # APK created by buildozer
-        if-no-files-found: fail # Fail the workflow if the APK is still not found here
+        if-no-files-found: error # Fail the workflow if the APK is still not found here

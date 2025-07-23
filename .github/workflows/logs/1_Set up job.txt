@@ -1,38 +1,38 @@
-﻿2025-07-23T19:46:40.1134020Z Current runner version: '2.326.0'
-2025-07-23T19:46:40.1183868Z ##[group]Runner Image Provisioner
-2025-07-23T19:46:40.1184746Z Hosted Compute Agent
-2025-07-23T19:46:40.1185248Z Version: 20250711.363
-2025-07-23T19:46:40.1185928Z Commit: 6785254374ce925a23743850c1cb91912ce5c14c
-2025-07-23T19:46:40.1186600Z Build Date: 2025-07-11T20:04:25Z
-2025-07-23T19:46:40.1187134Z ##[endgroup]
-2025-07-23T19:46:40.1188049Z ##[group]Operating System
-2025-07-23T19:46:40.1188621Z Ubuntu
-2025-07-23T19:46:40.1189093Z 24.04.2
-2025-07-23T19:46:40.1189630Z LTS
-2025-07-23T19:46:40.1190094Z ##[endgroup]
-2025-07-23T19:46:40.1190544Z ##[group]Runner Image
-2025-07-23T19:46:40.1191158Z Image: ubuntu-24.04
-2025-07-23T19:46:40.1191677Z Version: 20250720.1.0
-2025-07-23T19:46:40.1192625Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20250720.1/images/ubuntu/Ubuntu2404-Readme.md
-2025-07-23T19:46:40.1194047Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20250720.1
-2025-07-23T19:46:40.1195119Z ##[endgroup]
-2025-07-23T19:46:40.1196275Z ##[group]GITHUB_TOKEN Permissions
-2025-07-23T19:46:40.1198514Z Contents: read
-2025-07-23T19:46:40.1199127Z Metadata: read
-2025-07-23T19:46:40.1199659Z Packages: read
-2025-07-23T19:46:40.1200115Z ##[endgroup]
-2025-07-23T19:46:40.1202127Z Secret source: Actions
-2025-07-23T19:46:40.1202821Z Prepare workflow directory
-2025-07-23T19:46:40.1529579Z Prepare all required actions
-2025-07-23T19:46:40.1568401Z Getting action download info
-2025-07-23T19:46:40.4804306Z ##[group]Download immutable action package 'actions/checkout@v4'
-2025-07-23T19:46:40.4805291Z Version: 4.2.2
-2025-07-23T19:46:40.4806395Z Digest: sha256:ccb2698953eaebd21c7bf6268a94f9c26518a7e38e27e0b83c1fe1ad049819b1
-2025-07-23T19:46:40.4807540Z Source commit SHA: 11bd71901bbe5b1630ceea73d27597364c9af683
-2025-07-23T19:46:40.4808452Z ##[endgroup]
-2025-07-23T19:46:40.5656817Z ##[group]Download immutable action package 'actions/upload-artifact@v4'
-2025-07-23T19:46:40.5657934Z Version: 4.6.2
-2025-07-23T19:46:40.5658728Z Digest: sha256:290722aa3281d5caf23d0acdc3dbeb3424786a1a01a9cc97e72f147225e37c38
-2025-07-23T19:46:40.5659704Z Source commit SHA: ea165f8d65b6e75b540449e92b4886f43607fa02
-2025-07-23T19:46:40.5660365Z ##[endgroup]
-2025-07-23T19:46:40.8920367Z Complete job name: build
+﻿2025-07-23T20:48:02.6442646Z Current runner version: '2.326.0'
+2025-07-23T20:48:02.6495816Z ##[group]Runner Image Provisioner
+2025-07-23T20:48:02.6497087Z Hosted Compute Agent
+2025-07-23T20:48:02.6497984Z Version: 20250711.363
+2025-07-23T20:48:02.6498852Z Commit: 6785254374ce925a23743850c1cb91912ce5c14c
+2025-07-23T20:48:02.6500104Z Build Date: 2025-07-11T20:04:25Z
+2025-07-23T20:48:02.6501055Z ##[endgroup]
+2025-07-23T20:48:02.6501854Z ##[group]Operating System
+2025-07-23T20:48:02.6503194Z Ubuntu
+2025-07-23T20:48:02.6504008Z 24.04.2
+2025-07-23T20:48:02.6504759Z LTS
+2025-07-23T20:48:02.6505624Z ##[endgroup]
+2025-07-23T20:48:02.6506415Z ##[group]Runner Image
+2025-07-23T20:48:02.6507310Z Image: ubuntu-24.04
+2025-07-23T20:48:02.6508269Z Version: 20250720.1.0
+2025-07-23T20:48:02.6509963Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20250720.1/images/ubuntu/Ubuntu2404-Readme.md
+2025-07-23T20:48:02.6512285Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20250720.1
+2025-07-23T20:48:02.6514527Z ##[endgroup]
+2025-07-23T20:48:02.6516390Z ##[group]GITHUB_TOKEN Permissions
+2025-07-23T20:48:02.6518871Z Contents: read
+2025-07-23T20:48:02.6519701Z Metadata: read
+2025-07-23T20:48:02.6520615Z Packages: read
+2025-07-23T20:48:02.6521430Z ##[endgroup]
+2025-07-23T20:48:02.6524524Z Secret source: Actions
+2025-07-23T20:48:02.6525709Z Prepare workflow directory
+2025-07-23T20:48:02.6997951Z Prepare all required actions
+2025-07-23T20:48:02.7056244Z Getting action download info
+2025-07-23T20:48:02.9770449Z ##[group]Download immutable action package 'actions/checkout@v4'
+2025-07-23T20:48:02.9771606Z Version: 4.2.2
+2025-07-23T20:48:02.9772745Z Digest: sha256:ccb2698953eaebd21c7bf6268a94f9c26518a7e38e27e0b83c1fe1ad049819b1
+2025-07-23T20:48:02.9774075Z Source commit SHA: 11bd71901bbe5b1630ceea73d27597364c9af683
+2025-07-23T20:48:02.9774875Z ##[endgroup]
+2025-07-23T20:48:03.0786048Z ##[group]Download immutable action package 'actions/upload-artifact@v4'
+2025-07-23T20:48:03.0786913Z Version: 4.6.2
+2025-07-23T20:48:03.0787630Z Digest: sha256:290722aa3281d5caf23d0acdc3dbeb3424786a1a01a9cc97e72f147225e37c38
+2025-07-23T20:48:03.0788714Z Source commit SHA: ea165f8d65b6e75b540449e92b4886f43607fa02
+2025-07-23T20:48:03.0789370Z ##[endgroup]
+2025-07-23T20:48:03.2727456Z Complete job name: build
