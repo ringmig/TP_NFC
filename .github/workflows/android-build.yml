@@ -81,39 +81,55 @@ jobs:
             export PATH=\$JAVA_HOME/bin:\$PATH
             java -version
             
-            echo 'Pre-accepting Android SDK licenses...'
-            # Set up Android SDK environment
+            echo 'Setting up Android SDK manually to avoid license issues...'
+            
+            # Create Android SDK directory structure
             export ANDROID_HOME=/root/.buildozer/android/platform/android-sdk
             export ANDROID_SDK_ROOT=\$ANDROID_HOME
-            export PATH=\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$PATH
+            mkdir -p \$ANDROID_HOME/cmdline-tools
             
-            # Let buildozer download SDK first, then accept licenses
-            echo 'Running buildozer to download SDK...'
-            set +e  # Disable exit on error for SDK setup phase
-            timeout 600 buildozer android debug --verbose 2>&1 | tee buildozer_output.log || echo 'SDK download phase completed'
-            set -e  # Re-enable exit on error
+            # Download and setup Android command-line tools
+            echo 'Downloading Android command-line tools...'
+            cd /tmp
+            wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
+            unzip -q commandlinetools-linux-9477386_latest.zip
+            mv cmdline-tools \$ANDROID_HOME/cmdline-tools/latest
+            cd /workspace
             
-            # Find and run sdkmanager to accept licenses
-            echo 'Looking for sdkmanager...'
-            SDKMANAGER=\$(find /root/.buildozer -name 'sdkmanager' -type f 2>/dev/null | head -1)
-            if [ -n \"\$SDKMANAGER\" ]; then
-              echo \"Found sdkmanager at: \$SDKMANAGER\"
-              echo 'Accepting all Android SDK licenses...'
-              yes | \$SDKMANAGER --licenses || echo 'License acceptance completed'
-              
-              # Install required SDK components with correct versions
-              echo 'Installing required SDK components...'
-              \$SDKMANAGER \
-                'platforms;android-30' \
-                'platforms;android-21' \
-                'build-tools;30.0.3' \
-                'platform-tools' \
-                'cmake;3.10.2.4988404' || echo 'SDK components installation completed'
-            else
-              echo 'WARNING: sdkmanager not found, licenses may not be accepted'
-            fi
+            # Set PATH for SDK tools
+            export PATH=\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$ANDROID_HOME/build-tools/30.0.3:\$PATH
             
-            echo 'Running final buildozer build...'
+            # Accept all licenses FIRST
+            echo 'Accepting Android SDK licenses upfront...'
+            yes | sdkmanager --licenses || echo 'License acceptance completed'
+            
+            # Install required SDK components with exact versions
+            echo 'Installing required Android SDK components...'
+            sdkmanager \
+              'platforms;android-30' \
+              'platforms;android-21' \
+              'build-tools;30.0.3' \
+              'platform-tools' \
+              'cmake;3.10.2.4988404' || echo 'SDK components installation completed'
+            
+            # Verify installation
+            echo 'Verifying SDK installation...'
+            ls -la \$ANDROID_HOME/platforms/ || echo 'No platforms directory'
+            ls -la \$ANDROID_HOME/build-tools/ || echo 'No build-tools directory'
+            find \$ANDROID_HOME -name 'aidl' -type f | head -5 || echo 'aidl not found'
+            
+            # Force buildozer to use our pre-installed SDK
+            echo 'Configuring buildozer to use pre-installed SDK...'
+            export ANDROIDAPI=30
+            export ANDROIDMINAPI=21
+            export ANDROIDSDK=\$ANDROID_HOME
+            export ANDROIDNDK=\$ANDROID_HOME/ndk-bundle
+            
+            # Clean any partial buildozer cache
+            rm -rf .buildozer/android/platform/build-* || true
+            rm -rf .buildozer/android/platform/dists || true
+            
+            echo 'Running buildozer with pre-configured SDK...'
             buildozer android debug --verbose
           " 2>&1; then
           
