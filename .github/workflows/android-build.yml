@@ -115,8 +115,15 @@ jobs:
                 "platform-tools" \
                 "cmake;3.10.2.4988404"
         
-        # Verify aidl is accessible
-        RUN which aidl || find $ANDROID_HOME -name "aidl" -type f | head -1
+        # Create compatibility symlink for buildozer's expected SDK structure
+        RUN mkdir -p $ANDROID_HOME/tools/bin && \
+            ln -sf $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager $ANDROID_HOME/tools/bin/sdkmanager && \
+            ln -sf $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager $ANDROID_HOME/tools/bin/avdmanager
+        
+        # Verify aidl is accessible and SDK structure
+        RUN which aidl || find $ANDROID_HOME -name "aidl" -type f | head -1 && \
+            ls -la $ANDROID_HOME/tools/bin/ && \
+            $ANDROID_HOME/tools/bin/sdkmanager --version
         
         # Set working directory for builds
         WORKDIR /workspace
