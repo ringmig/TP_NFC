@@ -151,7 +151,7 @@ jobs:
         export ACLOCAL_PATH="/usr/share/aclocal"
         export ACLOCAL="aclocal -I /usr/share/aclocal"
         
-# Ensure buildozer.spec has correct values (force update)
+        # Ensure buildozer.spec has correct values (force update)
         echo "Updating buildozer.spec to ensure correct values..."
         sed -i 's/^android\.api = .*/android.api = 30/' buildozer.spec
         sed -i 's/^android\.ndk = .*/android.ndk = 25b/' buildozer.spec  
@@ -180,7 +180,7 @@ jobs:
         echo "JAVA_HOME=$JAVA_HOME"
         java -version
         
-# Clean buildozer cache to ensure new settings are used
+        # Clean buildozer cache to ensure new settings are used
         rm -rf .buildozer/android/platform/build-*
         rm -rf .buildozer/android/platform/dists
         
