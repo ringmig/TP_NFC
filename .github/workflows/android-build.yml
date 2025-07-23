@@ -46,21 +46,57 @@ jobs:
         echo "Final buildozer.spec configuration:"
         grep -E "android\.(api|sdk|ndk|minapi|archs|build_tools|enable_androidx)|requirements" buildozer.spec
     
-    - name: Build APK using Kivy Buildozer Docker image
-      working-directory: Android # Execute buildozer from the 'Android' directory
+    - name: Build APK using Docker
+      working-directory: Android
+      timeout-minutes: 45
       run: |
-        echo "Building APK using kivy/buildozer:stable Docker image..."
+        echo "Building APK using Docker with custom buildozer setup..."
         
-        # The kivy/buildozer image has all dependencies pre-installed and licenses accepted.
-        # We just need to run buildozer from within the container.
-        # Mount the current directory (which contains buildozer.spec and your app code)
-        # to /home/user/app inside the container.
+        # Create a simple Dockerfile for buildozer
+        cat > Dockerfile << 'EOF'
+        FROM ubuntu:20.04
+        
+        # Prevent interactive prompts during package installation
+        ENV DEBIAN_FRONTEND=noninteractive
+        
+        # Install system dependencies
+        RUN apt-get update && apt-get install -y \
+            python3 \
+            python3-pip \
+            openjdk-8-jdk \
+            git \
+            unzip \
+            wget \
+            curl \
+            build-essential \
+            zip \
+            && rm -rf /var/lib/apt/lists/*
+        
+        # Set Java environment
+        ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+        ENV PATH=$JAVA_HOME/bin:$PATH
+        
+        # Install buildozer and dependencies
+        RUN pip3 install buildozer==1.5.0 cython==0.29.33
+        
+        # Set working directory
+        WORKDIR /workspace
+        
+        # Default command
+        CMD ["buildozer", "android", "debug", "--verbose"]
+        EOF
+        
+        echo "Building custom buildozer Docker image..."
+        docker build -t custom-buildozer .
+        
+        echo "Running buildozer in Docker container..."
         docker run --rm \
-          -v "$PWD":/home/user/app \
-          -w /home/user/app \
-          kivy/buildozer:stable \
+          -v "$PWD":/workspace \
+          -w /workspace \
+          custom-buildozer \
           buildozer android debug --verbose 2>&1 | tee build.log || {
             echo "Buildozer Docker build failed! See build.log for details."
+            echo "Last 500 lines of build.log:"
             tail -500 build.log
             exit 1
           }
