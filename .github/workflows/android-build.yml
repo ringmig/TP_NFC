@@ -36,26 +36,44 @@ jobs:
         timeout 300 buildozer android debug || echo "Buildozer SDK setup completed (expected failure at license prompt)"
         set -e # Re-enable exit on error
         
-        # Now accept licenses with the downloaded SDK
+        # Now accept licenses with the downloaded SDK (with proper sdk_root)
         echo "Accepting Android SDK licenses..."
-        if [ -f $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ]; then
+        SDK_ROOT="$HOME/.buildozer/android/platform/android-sdk"
+        
+        if [ -f $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager ]; then
           echo "Using cmdline-tools sdkmanager..."
-          yes | $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
-        elif [ -f $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager ]; then
+          yes | $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root="$SDK_ROOT" --licenses
+        elif [ -f $SDK_ROOT/tools/bin/sdkmanager ]; then
           echo "Using tools sdkmanager..."
-          yes | $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --licenses
+          yes | $SDK_ROOT/tools/bin/sdkmanager --sdk_root="$SDK_ROOT" --licenses
         else
           echo "Searching for sdkmanager..."
-          find $HOME/.buildozer -name "sdkmanager" -type f 2>/dev/null | head -1 | xargs -I {} yes | {} --licenses || echo "No sdkmanager found"
+          SDKMANAGER_PATH=$(find $HOME/.buildozer -name "sdkmanager" -type f 2>/dev/null | head -1)
+          if [ -n "$SDKMANAGER_PATH" ]; then
+            echo "Found sdkmanager at: $SDKMANAGER_PATH"
+            yes | "$SDKMANAGER_PATH" --sdk_root="$SDK_ROOT" --licenses
+          else
+            echo "No sdkmanager found"
+          fi
         fi
         
         # Install specific build tools version to avoid version 36 issues
         echo "Installing specific build-tools version..."
-        if [ -f $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ]; then
-          $HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager "build-tools;27.0.3" "platform-tools" "platforms;android-27"
-        elif [ -f $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager ]; then
-          $HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager "build-tools;27.0.3" "platform-tools" "platforms;android-27"
+        if [ -f $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager ]; then
+          $SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root="$SDK_ROOT" "build-tools;27.0.3" "platform-tools" "platforms;android-27"
+        elif [ -f $SDK_ROOT/tools/bin/sdkmanager ]; then
+          $SDK_ROOT/tools/bin/sdkmanager --sdk_root="$SDK_ROOT" "build-tools;27.0.3" "platform-tools" "platforms;android-27"
+        else
+          SDKMANAGER_PATH=$(find $HOME/.buildozer -name "sdkmanager" -type f 2>/dev/null | head -1)
+          if [ -n "$SDKMANAGER_PATH" ]; then
+            "$SDKMANAGER_PATH" --sdk_root="$SDK_ROOT" "build-tools;27.0.3" "platform-tools" "platforms;android-27"
+          fi
         fi
+        
+        # Verify build-tools installation
+        echo "Checking build-tools installation..."
+        ls -la "$SDK_ROOT/build-tools/" 2>/dev/null || echo "build-tools directory not found"
+        find "$SDK_ROOT" -name "aidl" -type f 2>/dev/null || echo "aidl tool not found"
         
     - name: Build APK with licenses pre-accepted
       working-directory: Android
