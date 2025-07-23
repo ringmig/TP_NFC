@@ -12,10 +12,10 @@ jobs:
       with:
         python-version: '3.8'
     
-    - name: Set up JDK 8
+    - name: Set up JDK 11
       uses: actions/setup-java@v4
       with:
-        java-version: '8'
+        java-version: '11'
         distribution: 'temurin'
         
     - name: Install system dependencies
@@ -112,6 +112,35 @@ jobs:
         ls -la "$ANDROID_HOME/build-tools/" || echo "No build-tools directory"
         find "$ANDROID_HOME" -name "aidl" -type f | head -5 || echo "aidl not found"
         
+    - name: Set Android Environment Variables for Build
+      working-directory: Android
+      run: |
+        export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
+        export ANDROID_SDK_ROOT=$ANDROID_HOME
+        
+        # Find the actual NDK path (buildozer downloads specific version)
+        NDK_PATH=$(find $HOME/.buildozer/android/platform -name "android-ndk-r*" -type d | head -1)
+        if [ -n "$NDK_PATH" ]; then
+          export ANDROID_NDK_HOME="$NDK_PATH"
+          echo "Found NDK at: $NDK_PATH"
+        else
+          echo "NDK not found, using default path"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/25.1.8937393"
+        fi
+        
+        # Add these exports to the global environment for subsequent steps
+        echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+        echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+        
+        # Update PATH to include SDK tools
+        echo "PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/30.0.3:$PATH" >> $GITHUB_ENV
+        
+        echo "Environment variables set:"
+        echo "ANDROID_HOME=$ANDROID_HOME"
+        echo "ANDROID_SDK_ROOT=$ANDROID_HOME"
+        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+        
     - name: Build APK with licenses pre-accepted
       working-directory: Android
       run: |
@@ -121,17 +150,60 @@ jobs:
         export ACLOCAL_PATH="/usr/share/aclocal"
         export ACLOCAL="aclocal -I /usr/share/aclocal"
         
-        # Show buildozer configuration
-        echo "Buildozer configuration:"
-        grep -E "android\.(api|sdk|ndk|minapi|archs|build_tools)" buildozer.spec
+        # Ensure buildozer.spec has correct values (force update)
+        echo "Updating buildozer.spec to ensure correct values..."
+        sed -i 's/^android\.api = .*/android.api = 30/' buildozer.spec
+        sed -i 's/^android\.ndk = .*/android.ndk = 25b/' buildozer.spec  
+        sed -i 's/^android\.minapi = .*/android.minapi = 23/' buildozer.spec
+        sed -i 's/^android\.sdk = .*/android.sdk = 30/' buildozer.spec
+        sed -i 's/^android\.build_tools = .*/android.build_tools = 30.0.3/' buildozer.spec
+        
+        # Show final buildozer configuration
+        echo "Final buildozer configuration:"
+        grep -E "android\.(api|sdk|ndk|minapi|archs|build_tools|enable_androidx)" buildozer.spec
+        
+        # Show environment variables
+        echo "Environment variables:"
+        echo "ANDROID_HOME=$ANDROID_HOME"
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" 
+        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+        echo "JAVA_HOME=$JAVA_HOME"
+        java -version
         
         # Clean buildozer cache to ensure new settings are used
         rm -rf .buildozer/android/platform/build-*
         rm -rf .buildozer/android/platform/dists
         
-        # Clean and build
+        # Clean and build with maximum verbosity
         buildozer android clean
-        buildozer android debug
+        
+        # Try building with maximum detailed error output
+        echo "Starting APK build with maximum verbosity..."
+        buildozer android debug --verbose 2>&1 | tee build.log || {
+          echo "Build failed, checking for Gradle errors..."
+          echo "Last 100 lines of build log:"
+          tail -100 build.log
+          
+          # Check if gradlew exists and try to get more info
+          GRADLE_PATH=$(find .buildozer -name "gradlew" -type f 2>/dev/null | head -1)
+          if [ -n "$GRADLE_PATH" ]; then
+            echo "Found gradlew at: $GRADLE_PATH"
+            echo "Gradle version:"
+            "$GRADLE_PATH" --version || echo "Failed to get Gradle version"
+          fi
+          
+          # Check if APK was still created despite the error
+          echo "Checking for any APK files created..."
+          find .buildozer -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
+          find . -name "*.apk" -type f 2>/dev/null || echo "No APK files in current directory"
+          
+          exit 1
+        }
+        
+        # If build succeeded, show what was created
+        echo "Build completed successfully!"
+        echo "Listing created APK files:"
+        find . -name "*.apk" -type f -ls 2>/dev/null || echo "No APK files found"
         
     - name: Upload APK
       uses: actions/upload-artifact@v4

@@ -39,13 +39,13 @@ log_level = 2
 android.api = 30
 
 # (int) Minimum API your APK will support.
-android.minapi = 21
+android.minapi = 23
 
 # (int) Android SDK version to use
 android.sdk = 30
 
 # (str) Android NDK version to use
-android.ndk = 21d
+android.ndk = 25b
 
 # (str) Android SDK build tools version to use
 android.build_tools = 30.0.3
@@ -65,6 +65,13 @@ android.archs = armeabi-v7a
 
 # (str) Android entry point, default is ok for Kivy-based app
 android.entrypoint = org.kivy.android.PythonActivity
+
+# (bool) Enable AndroidX support. Enable when 'android.gradle_dependencies'
+# contains an 'androidx' package, or any package from Kotlin source.
+android.enable_androidx = True
+
+# (list) Gradle dependencies to add
+android.gradle_dependencies = androidx.appcompat:appcompat:1.0.0
 
 # (list) Pattern to whitelist for the whole project
 android.whitelist =
