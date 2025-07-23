@@ -64,8 +64,22 @@ jobs:
         CMD_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-6514223_latest.zip"
         echo "Downloading Android command-line tools from $CMD_TOOLS_URL"
         wget -q "$CMD_TOOLS_URL" -O /tmp/commandlinetools.zip
-        unzip -q /tmp/commandlinetools.zip -d "$ANDROID_HOME/cmdline-tools"
-        mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+        unzip -q /tmp/commandlinetools.zip -d /tmp/
+        
+        # Check the actual structure and move accordingly
+        echo "Checking extracted structure..."
+        ls -la /tmp/cmdline-tools/ || echo "No cmdline-tools directory"
+        ls -la /tmp/ | grep cmdline || echo "No cmdline directory found"
+        
+        # Move the extracted tools to the correct location
+        if [ -d "/tmp/cmdline-tools" ]; then
+          mv /tmp/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+        else
+          echo "ERROR: cmdline-tools directory not found in expected location"
+          ls -la /tmp/
+          exit 1
+        fi
+        
         rm /tmp/commandlinetools.zip
         echo "Android command-line tools installed to $ANDROID_HOME/cmdline-tools/latest"
 
