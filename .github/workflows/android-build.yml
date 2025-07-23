@@ -3,67 +3,53 @@ on: [push, pull_request]
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python 3.9
+    - name: Set up Python 3.8
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.8'
         
-    - name: Set up JDK 17
+    - name: Set up JDK 8
       uses: actions/setup-java@v4
       with:
-        java-version: '17'
+        java-version: '8'
         distribution: 'temurin'
         
     - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential git unzip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev
+        sudo apt-get install -y ccache ant wget curl lbzip2
         
-    - name: Install buildozer dependencies
+    - name: Setup buildozer
       run: |
         pip install --upgrade pip
-        pip install buildozer cython
+        pip install buildozer==1.4.0 cython==0.29.33
         
-    - name: Accept Android licenses (pre-setup)
-      run: |
-        mkdir -p "$HOME/.android"
-        echo '
-        8933bad161af4178b1185d1a37fbf41ea5269c55
-        d56f5187479451eabf01fb78af6dfcb131a6481e
-        24333f8a63b6825ea9c5514f83c2829b004d1fee' > "$HOME/.android/repositories.cfg"
-        
+    - name: Cache buildozer global directory
+      uses: actions/cache@v3
+      with:
+        path: ~/.buildozer
+        key: ${{ runner.os }}-buildozer-${{ hashFiles('Android/buildozer.spec') }}
+        restore-keys: |
+          ${{ runner.os }}-buildozer-
+          
     - name: Build APK
       working-directory: Android
       run: |
-        # Accept licenses for buildozer's SDK
-        export BUILDOZER_LOG_LEVEL=2
+        # Set environment variables
+        export ANDROID_ARCH=arm64-v8a
+        export P4A_ARCH=arm64-v8a
         
-        # Start buildozer which will download SDK
-        timeout 1800 buildozer android debug || {
-          # If buildozer fails, try to accept licenses for its SDK
-          if [ -d ~/.buildozer/android/platform/android-sdk ]; then
-            echo "Accepting licenses for buildozer's Android SDK..."
-            yes | ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk --licenses || true
-            yes | ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk --licenses || true
-            
-            # Install build-tools if missing
-            ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk "build-tools;30.0.3" || true
-            ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk "build-tools;30.0.3" || true
-            
-            # Retry build
-            buildozer android debug
-          else
-            exit 1
-          fi
-        }
+        # Build
+        buildozer android debug
         
     - name: Upload APK
       uses: actions/upload-artifact@v4
       if: success()
       with:
-        name: android-apk
+        name: android-apk-${{ github.sha }}
         path: Android/bin/*.apk

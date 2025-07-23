@@ -36,16 +36,16 @@ log_level = 2
 [android]
 
 # (int) Target Android API, should be as high as possible.
-android.api = 30
+android.api = 28
 
 # (int) Minimum API your APK will support.
 android.minapi = 21
 
 # (int) Android SDK version to use
-android.sdk = 30
+android.sdk = 28
 
 # (str) Android NDK version to use
-android.ndk = 19b
+android.ndk = 19c
 
 # (bool) Use --private data storage (True) or --dir public storage (False)
 android.private_storage = True
