@@ -57,4 +57,9 @@ htmlcov/
 # Temporary files
 *.tmp
 *.bak
-*~Android/.buildozer/
+*~
+
+# Android build artifacts
+Android/.buildozer/
+Android/bin/
+*.apk
