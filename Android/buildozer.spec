@@ -36,19 +36,25 @@ log_level = 2
 [android]
 
 # (int) Target Android API, should be as high as possible.
-android.api = 28
+android.api = 27
 
 # (int) Minimum API your APK will support.
 android.minapi = 21
 
 # (int) Android SDK version to use
-android.sdk = 28
+android.sdk = 27
 
 # (str) Android NDK version to use
-android.ndk = 19c
+android.ndk = 17c
 
 # (str) Android SDK build tools version to use
-android.build_tools = 28.0.3
+android.build_tools = 27.0.3
+
+# (str) python-for-android URL (to use older, stable version)
+p4a.url = https://github.com/kivy/python-for-android/archive/master.zip
+
+# (str) python-for-android branch to use
+p4a.branch = master
 
 # (bool) Use --private data storage (True) or --dir public storage (False)
 android.private_storage = True
