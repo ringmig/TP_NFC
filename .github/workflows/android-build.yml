@@ -70,14 +70,23 @@ jobs:
             curl \
             build-essential \
             zip \
+            sudo \
             && rm -rf /var/lib/apt/lists/*
+        
+        # Create non-root user for buildozer
+        RUN useradd -m -u 1000 builduser && \
+            echo "builduser:builduser" | chpasswd && \
+            adduser builduser sudo && \
+            echo "builduser ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
         
         # Set Java environment
         ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
         ENV PATH=$JAVA_HOME/bin:$PATH
         
-        # Install buildozer and dependencies
-        RUN pip3 install buildozer==1.5.0 cython==0.29.33
+        # Install buildozer and dependencies as builduser
+        USER builduser
+        RUN pip3 install --user buildozer==1.5.0 cython==0.29.33
+        ENV PATH=/home/builduser/.local/bin:$PATH
         
         # Set working directory
         WORKDIR /workspace
@@ -90,9 +99,14 @@ jobs:
         docker build -t custom-buildozer .
         
         echo "Running buildozer in Docker container..."
+        
+        # Make sure the workspace has proper permissions
+        sudo chown -R 1000:1000 .
+        
         docker run --rm \
           -v "$PWD":/workspace \
           -w /workspace \
+          -u builduser \
           custom-buildozer \
           buildozer android debug --verbose 2>&1 | tee build.log || {
             echo "Buildozer Docker build failed! See build.log for details."
