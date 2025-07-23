@@ -15,6 +15,39 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
+    - name: Setup Docker and pull buildozer images
+      run: |
+        echo "Setting up Docker and pulling buildozer images..."
+        
+        # Update Docker to latest version to handle newer image formats
+        sudo apt-get update
+        sudo apt-get install -y docker.io
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        
+        # Add current user to docker group (though may not take effect immediately)
+        sudo usermod -aG docker $USER || true
+        
+        # Try to pull working buildozer images
+        DOCKER_IMAGES=(
+          "kivy/buildozer:1.5.0"
+          "kivy/buildozer:1.4.0"
+        )
+        
+        for IMAGE in "${DOCKER_IMAGES[@]}"; do
+          echo "Attempting to pull $IMAGE..."
+          if docker pull "$IMAGE" 2>/dev/null; then
+            echo "✅ Successfully pulled $IMAGE"
+            docker images | grep buildozer
+            break
+          else
+            echo "❌ Failed to pull $IMAGE"
+          fi
+        done
+        
+        echo "Available Docker images:"
+        docker images
+    
     - name: Prepare buildozer.spec for Docker build
       working-directory: Android
       run: |
@@ -44,20 +77,60 @@ jobs:
     - name: Build APK using Docker
       working-directory: Android
       run: |
-        echo "Building APK using official Kivy buildozer Docker image..."
+        echo "Building APK using buildozer Docker image..."
         echo "Current directory contents:"
         ls -la
         
         # Create output directory
         mkdir -p bin
         
-        # Run buildozer in Docker with volume mounts
-        docker run --rm \
-          -v "$PWD":/home/user/hostcwd \
-          -v buildozer-cache:/home/user/.buildozer \
-          --workdir /home/user/hostcwd \
-          kivy/buildozer:latest \
-          android debug
+        # Try multiple Docker images in order of preference
+        DOCKER_IMAGES=(
+          "kivy/buildozer:1.5.0"
+          "kivy/buildozer:1.4.0" 
+          "ghcr.io/kivy/buildozer:latest"
+          "registry.gitlab.com/kivy/buildozer:latest"
+        )
+        
+        BUILD_SUCCESS=false
+        
+        for IMAGE in "${DOCKER_IMAGES[@]}"; do
+          echo "Trying Docker image: $IMAGE"
+          
+          if docker run --rm \
+            -v "$PWD":/home/user/hostcwd \
+            -v buildozer-cache:/home/user/.buildozer \
+            --workdir /home/user/hostcwd \
+            "$IMAGE" \
+            android debug; then
+            
+            echo "✅ Build succeeded with image: $IMAGE"
+            BUILD_SUCCESS=true
+            break
+          else
+            echo "❌ Build failed with image: $IMAGE, trying next..."
+            # Clean up any partial builds
+            rm -rf .buildozer/android/platform/build-* || true
+          fi
+        done
+        
+        if [ "$BUILD_SUCCESS" != "true" ]; then
+          echo "❌ All Docker images failed. Falling back to manual buildozer installation..."
+          
+          # Install buildozer manually as fallback
+          sudo apt-get update
+          sudo apt-get install -y python3-pip openjdk-11-jdk unzip
+          pip3 install buildozer==1.5.0 cython==0.29.33
+          
+          # Set JAVA_HOME
+          export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+          
+          # Try building with installed buildozer
+          buildozer android debug || {
+            echo "❌ Fallback buildozer also failed"
+            exit 1
+          }
+        fi
           
         echo "Docker build completed. Searching for APK..."
         
