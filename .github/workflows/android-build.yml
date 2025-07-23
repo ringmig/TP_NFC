@@ -109,7 +109,7 @@ jobs:
         # Define required versions based on buildozer.spec and common practice
         REQUIRED_API_LEVEL="30"
         REQUIRED_BUILD_TOOLS_VERSION="30.0.3"
-        REQUIRED_NDK_VERSION="25b" # Match buildozer.spec and common NDK versions
+        REQUIRED_NDK_VERSION="25.1.8937393" # Full NDK version number
 
         echo "Installing specific Android SDK components:"
         echo "  - platforms;android-$REQUIRED_API_LEVEL"
@@ -119,6 +119,10 @@ jobs:
         echo "  - ndk;${REQUIRED_NDK_VERSION}"
         echo "  - cmake;3.10.2.4988404"
 
+        # First, let's see what NDK packages are available
+        echo "Available NDK packages:"
+        sdkmanager --list | grep "ndk" | head -10 || echo "Could not list NDK packages"
+
         sdkmanager \
           "platforms;android-$REQUIRED_API_LEVEL" \
           "platforms;android-21" \
@@ -126,25 +130,52 @@ jobs:
           "platform-tools" \
           "ndk;${REQUIRED_NDK_VERSION}" \
           "cmake;3.10.2.4988404" || {
-            echo "ERROR: Failed to install all required SDK components."
-            exit 1
+            echo "ERROR: Failed to install some SDK components. Trying without NDK..."
+            # Try without NDK first, then install NDK separately
+            sdkmanager \
+              "platforms;android-$REQUIRED_API_LEVEL" \
+              "platforms;android-21" \
+              "build-tools;$REQUIRED_BUILD_TOOLS_VERSION" \
+              "platform-tools" \
+              "cmake;3.10.2.4988404" || {
+                echo "ERROR: Failed to install basic SDK components."
+                exit 1
+              }
+            
+            # Try alternative NDK versions
+            echo "Trying alternative NDK versions..."
+            sdkmanager "ndk-bundle" || sdkmanager "ndk;21.4.7075529" || echo "Could not install any NDK version"
           }
         echo "All required SDK components installed."
 
         # Find the actual NDK path after installation and set ANDROID_NDK_HOME globally
-        NDK_PATH=$(find "$ANDROID_HOME/ndk" -maxdepth 1 -name "*-r${REQUIRED_NDK_VERSION}*" -type d | head -1)
+        echo "Looking for installed NDK..."
+        ls -la "$ANDROID_HOME/" | grep ndk || echo "No ndk directory found"
+        
+        # Look for NDK in multiple possible locations
+        NDK_PATH=""
+        if [ -d "$ANDROID_HOME/ndk" ]; then
+          NDK_PATH=$(find "$ANDROID_HOME/ndk" -maxdepth 1 -type d | grep -v "^$ANDROID_HOME/ndk$" | head -1)
+        fi
+        
+        # Fallback to ndk-bundle if no versioned NDK found
+        if [ -z "$NDK_PATH" ] && [ -d "$ANDROID_HOME/ndk-bundle" ]; then
+          NDK_PATH="$ANDROID_HOME/ndk-bundle"
+        fi
+        
+        # Another fallback - look in buildozer's expected location
         if [ -z "$NDK_PATH" ]; then
-          # Fallback if find doesn't work as expected, though sdkmanager should install it
           NDK_PATH=$(find $HOME/.buildozer/android/platform -name "android-ndk-r*" -type d | head -1)
         fi
 
-        if [ -n "$NDK_PATH" ]; then
+        if [ -n "$NDK_PATH" ] && [ -d "$NDK_PATH" ]; then
           export ANDROID_NDK_HOME="$NDK_PATH"
           echo "Found NDK at: $NDK_PATH"
         else
-          echo "WARNING: NDK path not found after installation. Build might fail."
-          # Set a default path if NDK_PATH is still empty, though this is less reliable
-          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/25.1.8937393" # A common default
+          echo "WARNING: NDK path not found after installation. Setting default path."
+          # Set a default path - buildozer will download its own NDK if needed
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${REQUIRED_NDK_VERSION}"
+          echo "Set default NDK path: $ANDROID_NDK_HOME"
         fi
         echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
 
