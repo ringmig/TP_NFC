@@ -36,19 +36,19 @@ log_level = 2
 [android]
 
 # (int) Target Android API, should be as high as possible.
-android.api = 27
+android.api = 29
 
 # (int) Minimum API your APK will support.
 android.minapi = 21
 
 # (int) Android SDK version to use
-android.sdk = 27
+android.sdk = 29
 
 # (str) Android NDK version to use
-android.ndk = 17c
+android.ndk = 21d
 
 # (str) Android SDK build tools version to use
-android.build_tools = 27.0.3
+android.build_tools = 29.0.3
 
 # (str) python-for-android URL (to use older, stable version)
 p4a.url = https://github.com/kivy/python-for-android/archive/master.zip
@@ -61,7 +61,7 @@ android.private_storage = True
 
 # (list) The Android architectures to build for
 # available options: armeabi-v7a, arm64-v8a, x86, x86_64
-android.archs = arm64-v8a
+android.archs = armeabi-v7a
 
 # (str) Android entry point, default is ok for Kivy-based app
 android.entrypoint = org.kivy.android.PythonActivity
