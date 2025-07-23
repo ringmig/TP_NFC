@@ -15,38 +15,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup Docker and pull buildozer images
+    - name: Check Docker availability
       run: |
-        echo "Setting up Docker and pulling buildozer images..."
-        
-        # Update Docker to latest version to handle newer image formats
-        sudo apt-get update
-        sudo apt-get install -y docker.io
-        sudo systemctl start docker
-        sudo systemctl enable docker
-        
-        # Add current user to docker group (though may not take effect immediately)
-        sudo usermod -aG docker $USER || true
-        
-        # Try to pull working buildozer images
-        DOCKER_IMAGES=(
-          "kivy/buildozer:1.5.0"
-          "kivy/buildozer:1.4.0"
-        )
-        
-        for IMAGE in "${DOCKER_IMAGES[@]}"; do
-          echo "Attempting to pull $IMAGE..."
-          if docker pull "$IMAGE" 2>/dev/null; then
-            echo "✅ Successfully pulled $IMAGE"
-            docker images | grep buildozer
-            break
-          else
-            echo "❌ Failed to pull $IMAGE"
-          fi
-        done
-        
+        echo "Checking Docker setup on GitHub Actions runner..."
+        docker --version
+        docker info || echo "Docker info failed, but continuing..."
         echo "Available Docker images:"
-        docker images
+        docker images | head -10
     
     - name: Prepare buildozer.spec for Docker build
       working-directory: Android
@@ -84,35 +59,37 @@ jobs:
         # Create output directory
         mkdir -p bin
         
-        # Try multiple Docker images in order of preference
-        DOCKER_IMAGES=(
-          "kivy/buildozer:1.5.0"
-          "kivy/buildozer:1.4.0" 
-          "ghcr.io/kivy/buildozer:latest"
-          "registry.gitlab.com/kivy/buildozer:latest"
-        )
-        
+        # Try Docker-based build with custom Ubuntu container
         BUILD_SUCCESS=false
         
-        for IMAGE in "${DOCKER_IMAGES[@]}"; do
-          echo "Trying Docker image: $IMAGE"
-          
-          if docker run --rm \
-            -v "$PWD":/home/user/hostcwd \
-            -v buildozer-cache:/home/user/.buildozer \
-            --workdir /home/user/hostcwd \
-            "$IMAGE" \
-            android debug; then
+        echo "Attempting Docker-based build with custom Ubuntu container..."
+        
+        if docker run --rm \
+          -v "$PWD":/workspace \
+          --workdir /workspace \
+          ubuntu:20.04 bash -c "
+            set -e
+            echo 'Installing system dependencies...'
+            apt-get update -qq
+            apt-get install -y python3 python3-pip openjdk-8-jdk-headless git unzip wget curl build-essential
             
-            echo "✅ Build succeeded with image: $IMAGE"
-            BUILD_SUCCESS=true
-            break
-          else
-            echo "❌ Build failed with image: $IMAGE, trying next..."
-            # Clean up any partial builds
-            rm -rf .buildozer/android/platform/build-* || true
-          fi
-        done
+            echo 'Installing Python packages...'
+            pip3 install buildozer==1.5.0 cython==0.29.33
+            
+            echo 'Setting Java environment...'
+            export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
+            export PATH=\$JAVA_HOME/bin:\$PATH
+            java -version
+            
+            echo 'Running buildozer...'
+            buildozer android debug --verbose
+          " 2>&1; then
+          
+          echo "✅ Build succeeded with custom Ubuntu container"
+          BUILD_SUCCESS=true
+        else
+          echo "❌ Custom Ubuntu container build failed"
+        fi
         
         if [ "$BUILD_SUCCESS" != "true" ]; then
           echo "❌ All Docker images failed. Falling back to manual buildozer installation..."
