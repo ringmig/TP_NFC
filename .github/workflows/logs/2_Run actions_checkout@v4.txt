@@ -1,69 +1,69 @@
-﻿2025-07-23T19:26:41.4437944Z ##[group]Run actions/checkout@v4
-2025-07-23T19:26:41.4438859Z with:
-2025-07-23T19:26:41.4439319Z   repository: ringmig/TP_NFC
-2025-07-23T19:26:41.4440067Z   token: ***
-2025-07-23T19:26:41.4440520Z   ssh-strict: true
-2025-07-23T19:26:41.4440942Z   ssh-user: git
-2025-07-23T19:26:41.4441380Z   persist-credentials: true
-2025-07-23T19:26:41.4441881Z   clean: true
-2025-07-23T19:26:41.4442314Z   sparse-checkout-cone-mode: true
-2025-07-23T19:26:41.4443061Z   fetch-depth: 1
-2025-07-23T19:26:41.4443496Z   fetch-tags: false
-2025-07-23T19:26:41.4443927Z   show-progress: true
-2025-07-23T19:26:41.4444360Z   lfs: false
-2025-07-23T19:26:41.4444763Z   submodules: false
-2025-07-23T19:26:41.4445202Z   set-safe-directory: true
-2025-07-23T19:26:41.4446066Z ##[endgroup]
-2025-07-23T19:26:41.5550336Z Syncing repository: ringmig/TP_NFC
-2025-07-23T19:26:41.5553829Z ##[group]Getting Git version info
-2025-07-23T19:26:41.5555219Z Working directory is '/home/runner/work/TP_NFC/TP_NFC'
-2025-07-23T19:26:41.5557145Z [command]/usr/bin/git version
-2025-07-23T19:26:41.5638175Z git version 2.50.1
-2025-07-23T19:26:41.5680599Z ##[endgroup]
-2025-07-23T19:26:41.5706497Z Temporarily overriding HOME='/home/runner/work/_temp/58a1ae3f-8c77-4c67-abd6-49eeb0ddcfed' before making global git config changes
-2025-07-23T19:26:41.5709188Z Adding repository directory to the temporary git global config as a safe directory
-2025-07-23T19:26:41.5713028Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/TP_NFC/TP_NFC
-2025-07-23T19:26:41.5753161Z Deleting the contents of '/home/runner/work/TP_NFC/TP_NFC'
-2025-07-23T19:26:41.5757427Z ##[group]Initializing the repository
-2025-07-23T19:26:41.5762237Z [command]/usr/bin/git init /home/runner/work/TP_NFC/TP_NFC
-2025-07-23T19:26:41.5837877Z hint: Using 'master' as the name for the initial branch. This default branch name
-2025-07-23T19:26:41.5839365Z hint: is subject to change. To configure the initial branch name to use in all
-2025-07-23T19:26:41.5840572Z hint: of your new repositories, which will suppress this warning, call:
-2025-07-23T19:26:41.5841796Z hint:
-2025-07-23T19:26:41.5842391Z hint: 	git config --global init.defaultBranch <name>
-2025-07-23T19:26:41.5843698Z hint:
-2025-07-23T19:26:41.5844837Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
-2025-07-23T19:26:41.5846637Z hint: 'development'. The just-created branch can be renamed via this command:
-2025-07-23T19:26:41.5848098Z hint:
-2025-07-23T19:26:41.5848908Z hint: 	git branch -m <name>
-2025-07-23T19:26:41.5849787Z hint:
-2025-07-23T19:26:41.5850884Z hint: Disable this message with "git config set advice.defaultBranchName false"
-2025-07-23T19:26:41.5852896Z Initialized empty Git repository in /home/runner/work/TP_NFC/TP_NFC/.git/
-2025-07-23T19:26:41.5856069Z [command]/usr/bin/git remote add origin https://github.com/ringmig/TP_NFC
-2025-07-23T19:26:41.5894303Z ##[endgroup]
-2025-07-23T19:26:41.5895631Z ##[group]Disabling automatic garbage collection
-2025-07-23T19:26:41.5899141Z [command]/usr/bin/git config --local gc.auto 0
-2025-07-23T19:26:41.5930011Z ##[endgroup]
-2025-07-23T19:26:41.5931354Z ##[group]Setting up auth
-2025-07-23T19:26:41.5938092Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
-2025-07-23T19:26:41.5970141Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
-2025-07-23T19:26:41.6365168Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
-2025-07-23T19:26:41.6399632Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
-2025-07-23T19:26:41.6663597Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
-2025-07-23T19:26:41.6710667Z ##[endgroup]
-2025-07-23T19:26:41.6712277Z ##[group]Fetching the repository
-2025-07-23T19:26:41.6723412Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +07e69f9534af831ac291a7e456e3bff14ab3853d:refs/remotes/origin/master
-2025-07-23T19:26:44.5131482Z From https://github.com/ringmig/TP_NFC
-2025-07-23T19:26:44.5134114Z  * [new ref]         07e69f9534af831ac291a7e456e3bff14ab3853d -> origin/master
-2025-07-23T19:26:44.5158756Z ##[endgroup]
-2025-07-23T19:26:44.5160383Z ##[group]Determining the checkout info
-2025-07-23T19:26:44.5162174Z ##[endgroup]
-2025-07-23T19:26:44.5165023Z [command]/usr/bin/git sparse-checkout disable
-2025-07-23T19:26:44.5204522Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
-2025-07-23T19:26:44.5232506Z ##[group]Checking out the ref
-2025-07-23T19:26:44.5235918Z [command]/usr/bin/git checkout --progress --force -B master refs/remotes/origin/master
-2025-07-23T19:26:44.8689798Z Reset branch 'master'
-2025-07-23T19:26:44.8690510Z branch 'master' set up to track 'origin/master'.
-2025-07-23T19:26:44.8737425Z ##[endgroup]
-2025-07-23T19:26:44.8781220Z [command]/usr/bin/git log -1 --format=%H
-2025-07-23T19:26:44.8804906Z 07e69f9534af831ac291a7e456e3bff14ab3853d
+﻿2025-07-23T19:46:40.9574841Z ##[group]Run actions/checkout@v4
+2025-07-23T19:46:40.9575665Z with:
+2025-07-23T19:46:40.9576061Z   repository: ringmig/TP_NFC
+2025-07-23T19:46:40.9576679Z   token: ***
+2025-07-23T19:46:40.9577061Z   ssh-strict: true
+2025-07-23T19:46:40.9577445Z   ssh-user: git
+2025-07-23T19:46:40.9578014Z   persist-credentials: true
+2025-07-23T19:46:40.9578456Z   clean: true
+2025-07-23T19:46:40.9578938Z   sparse-checkout-cone-mode: true
+2025-07-23T19:46:40.9579406Z   fetch-depth: 1
+2025-07-23T19:46:40.9579791Z   fetch-tags: false
+2025-07-23T19:46:40.9580175Z   show-progress: true
+2025-07-23T19:46:40.9580569Z   lfs: false
+2025-07-23T19:46:40.9580923Z   submodules: false
+2025-07-23T19:46:40.9581317Z   set-safe-directory: true
+2025-07-23T19:46:40.9582017Z ##[endgroup]
+2025-07-23T19:46:41.0632007Z Syncing repository: ringmig/TP_NFC
+2025-07-23T19:46:41.0633678Z ##[group]Getting Git version info
+2025-07-23T19:46:41.0634345Z Working directory is '/home/runner/work/TP_NFC/TP_NFC'
+2025-07-23T19:46:41.0635363Z [command]/usr/bin/git version
+2025-07-23T19:46:41.0671150Z git version 2.50.1
+2025-07-23T19:46:41.0696661Z ##[endgroup]
+2025-07-23T19:46:41.0710790Z Temporarily overriding HOME='/home/runner/work/_temp/371094e9-ed48-4c1a-a57d-c621c432032d' before making global git config changes
+2025-07-23T19:46:41.0712964Z Adding repository directory to the temporary git global config as a safe directory
+2025-07-23T19:46:41.0722432Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/TP_NFC/TP_NFC
+2025-07-23T19:46:41.0754616Z Deleting the contents of '/home/runner/work/TP_NFC/TP_NFC'
+2025-07-23T19:46:41.0758207Z ##[group]Initializing the repository
+2025-07-23T19:46:41.0762089Z [command]/usr/bin/git init /home/runner/work/TP_NFC/TP_NFC
+2025-07-23T19:46:41.0836604Z hint: Using 'master' as the name for the initial branch. This default branch name
+2025-07-23T19:46:41.0838374Z hint: is subject to change. To configure the initial branch name to use in all
+2025-07-23T19:46:41.0839897Z hint: of your new repositories, which will suppress this warning, call:
+2025-07-23T19:46:41.0840873Z hint:
+2025-07-23T19:46:41.0841479Z hint: 	git config --global init.defaultBranch <name>
+2025-07-23T19:46:41.0842044Z hint:
+2025-07-23T19:46:41.0842563Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2025-07-23T19:46:41.0843432Z hint: 'development'. The just-created branch can be renamed via this command:
+2025-07-23T19:46:41.0844171Z hint:
+2025-07-23T19:46:41.0844765Z hint: 	git branch -m <name>
+2025-07-23T19:46:41.0845402Z hint:
+2025-07-23T19:46:41.0845975Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2025-07-23T19:46:41.0846875Z Initialized empty Git repository in /home/runner/work/TP_NFC/TP_NFC/.git/
+2025-07-23T19:46:41.0850106Z [command]/usr/bin/git remote add origin https://github.com/ringmig/TP_NFC
+2025-07-23T19:46:41.0883191Z ##[endgroup]
+2025-07-23T19:46:41.0883967Z ##[group]Disabling automatic garbage collection
+2025-07-23T19:46:41.0889373Z [command]/usr/bin/git config --local gc.auto 0
+2025-07-23T19:46:41.0924049Z ##[endgroup]
+2025-07-23T19:46:41.0926625Z ##[group]Setting up auth
+2025-07-23T19:46:41.0930860Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2025-07-23T19:46:41.0966637Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2025-07-23T19:46:41.1229575Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2025-07-23T19:46:41.1259639Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2025-07-23T19:46:41.1498567Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2025-07-23T19:46:41.1533286Z ##[endgroup]
+2025-07-23T19:46:41.1551423Z ##[group]Fetching the repository
+2025-07-23T19:46:41.1554141Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +e7985d4438bc2caea60f6ec2011fbfbc5ee7afac:refs/remotes/origin/master
+2025-07-23T19:46:43.9679433Z From https://github.com/ringmig/TP_NFC
+2025-07-23T19:46:43.9681104Z  * [new ref]         e7985d4438bc2caea60f6ec2011fbfbc5ee7afac -> origin/master
+2025-07-23T19:46:43.9704153Z ##[endgroup]
+2025-07-23T19:46:43.9705513Z ##[group]Determining the checkout info
+2025-07-23T19:46:43.9707018Z ##[endgroup]
+2025-07-23T19:46:43.9712144Z [command]/usr/bin/git sparse-checkout disable
+2025-07-23T19:46:43.9755904Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2025-07-23T19:46:43.9790159Z ##[group]Checking out the ref
+2025-07-23T19:46:43.9791805Z [command]/usr/bin/git checkout --progress --force -B master refs/remotes/origin/master
+2025-07-23T19:46:44.3212874Z Reset branch 'master'
+2025-07-23T19:46:44.3214498Z branch 'master' set up to track 'origin/master'.
+2025-07-23T19:46:44.3276416Z ##[endgroup]
+2025-07-23T19:46:44.3316863Z [command]/usr/bin/git log -1 --format=%H
+2025-07-23T19:46:44.3338718Z e7985d4438bc2caea60f6ec2011fbfbc5ee7afac

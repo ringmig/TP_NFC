@@ -204,12 +204,11 @@ jobs:
         
         if [ -n "$APK_FILE" ]; then
           echo "✅ Found APK: $APK_FILE"
-          # Ensure we have a standard location for upload
-          mkdir -p Android/bin
-          cp "$APK_FILE" Android/bin/testapp-debug.apk
-          echo "✅ Copied APK to Android/bin/testapp-debug.apk for upload"
-          ls -la Android/bin/
-          echo "APK size: $(du -h Android/bin/testapp-debug.apk)"
+          # The APK is already in a good location (bin/), just use it directly
+          echo "APK location: $APK_FILE"
+          echo "APK size: $(du -h $APK_FILE)"
+          echo "APK details:"
+          ls -la "$APK_FILE"
         else
           echo "❌ No APK file found after Docker build."
           echo "This is unexpected since the build reported success."
@@ -223,5 +222,5 @@ jobs:
       if: success() # Only upload if the previous steps succeeded
       with:
         name: android-apk-testapp-docker
-        path: Android/bin/testapp-debug.apk # Point to the standardized location
+        path: Android/bin/testapp-0.1-arm64-v8a_armeabi-v7a-debug.apk # APK created by buildozer
         if-no-files-found: fail # Fail the workflow if the APK is still not found here
