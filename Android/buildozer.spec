@@ -36,19 +36,19 @@ log_level = 2
 [android]
 
 # (int) Target Android API, should be as high as possible.
-android.api = 29
+android.api = 30
 
 # (int) Minimum API your APK will support.
 android.minapi = 21
 
 # (int) Android SDK version to use
-android.sdk = 29
+android.sdk = 30
 
 # (str) Android NDK version to use
 android.ndk = 21d
 
 # (str) Android SDK build tools version to use
-android.build_tools = 29.0.3
+android.build_tools = 30.0.3
 
 # (str) python-for-android URL (to use older, stable version)
 p4a.url = https://github.com/kivy/python-for-android/archive/master.zip

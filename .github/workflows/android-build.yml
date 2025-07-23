@@ -21,7 +21,22 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential git python3-pip unzip zlib1g-dev libncurses-dev libffi-dev libssl-dev autoconf libtool pkg-config ccache cmake
+        sudo apt-get install -y build-essential git python3-pip unzip zlib1g-dev libncurses-dev libffi-dev libssl-dev autoconf libtool libtool-bin pkg-config ccache cmake
+        sudo apt-get install -y automake m4 libltdl-dev gettext
+        
+        # Ensure libtool macros are available
+        echo "Setting up libtool environment..."
+        sudo ldconfig
+        
+        # Verify autotools installation
+        echo "Autotools versions:"
+        autoconf --version | head -1
+        automake --version | head -1
+        libtool --version | head -1
+        
+        # Export paths for libtool macros
+        export ACLOCAL_PATH="/usr/share/aclocal"
+        echo "ACLOCAL_PATH=$ACLOCAL_PATH"
         
     - name: Install Python packages
       run: |
@@ -80,8 +95,8 @@ jobs:
         yes | $SDKMANAGER --sdk_root="$ANDROID_HOME" --licenses || echo "License acceptance completed"
         
         # Install SDK components matching our buildozer.spec
-        REQUIRED_API_LEVEL="29"
-        REQUIRED_BUILD_TOOLS_VERSION="29.0.3"
+        REQUIRED_API_LEVEL="30"
+        REQUIRED_BUILD_TOOLS_VERSION="30.0.3"
         
         echo "Installing Android SDK components: API $REQUIRED_API_LEVEL, Build-tools $REQUIRED_BUILD_TOOLS_VERSION..."
         $SDKMANAGER --sdk_root="$ANDROID_HOME" \
@@ -102,9 +117,17 @@ jobs:
       run: |
         echo "Building APK with pre-accepted licenses..."
         
+        # Export environment for libtool
+        export ACLOCAL_PATH="/usr/share/aclocal"
+        export ACLOCAL="aclocal -I /usr/share/aclocal"
+        
         # Show buildozer configuration
         echo "Buildozer configuration:"
         grep -E "android\.(api|sdk|ndk|minapi|archs|build_tools)" buildozer.spec
+        
+        # Clean buildozer cache to ensure new settings are used
+        rm -rf .buildozer/android/platform/build-*
+        rm -rf .buildozer/android/platform/dists
         
         # Clean and build
         buildozer android clean
