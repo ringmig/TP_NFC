@@ -18,9 +18,6 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
         
-    - name: Setup Android SDK
-      uses: android-actions/setup-android@v3
-      
     - name: Install system dependencies
       run: |
         sudo apt-get update
@@ -31,28 +28,39 @@ jobs:
         pip install --upgrade pip
         pip install buildozer cython
         
-    - name: Accept Android licenses and install build tools
+    - name: Accept Android licenses (pre-setup)
       run: |
-        # Set environment variables
-        export ANDROID_HOME=$ANDROID_SDK_ROOT
-        export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools
-        
-        # Accept all licenses non-interactively
-        echo "y" | sdkmanager --licenses >/dev/null 2>&1 || true
-        echo "y" | sdkmanager --update >/dev/null 2>&1 || true
-        
-        # Install required packages
-        sdkmanager "platform-tools"
-        sdkmanager "platforms;android-30" 
-        sdkmanager "build-tools;30.0.3"
-        
-        # Verify installation
-        ls -la $ANDROID_SDK_ROOT/build-tools/
+        mkdir -p "$HOME/.android"
+        echo '
+        8933bad161af4178b1185d1a37fbf41ea5269c55
+        d56f5187479451eabf01fb78af6dfcb131a6481e
+        24333f8a63b6825ea9c5514f83c2829b004d1fee' > "$HOME/.android/repositories.cfg"
         
     - name: Build APK
       working-directory: Android
-      run: buildozer android debug
-      
+      run: |
+        # Accept licenses for buildozer's SDK
+        export BUILDOZER_LOG_LEVEL=2
+        
+        # Start buildozer which will download SDK
+        timeout 1800 buildozer android debug || {
+          # If buildozer fails, try to accept licenses for its SDK
+          if [ -d ~/.buildozer/android/platform/android-sdk ]; then
+            echo "Accepting licenses for buildozer's Android SDK..."
+            yes | ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk --licenses || true
+            yes | ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk --licenses || true
+            
+            # Install build-tools if missing
+            ~/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk "build-tools;30.0.3" || true
+            ~/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=$HOME/.buildozer/android/platform/android-sdk "build-tools;30.0.3" || true
+            
+            # Retry build
+            buildozer android debug
+          else
+            exit 1
+          fi
+        }
+        
     - name: Upload APK
       uses: actions/upload-artifact@v4
       if: success()
