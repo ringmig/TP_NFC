@@ -81,7 +81,39 @@ jobs:
             export PATH=\$JAVA_HOME/bin:\$PATH
             java -version
             
-            echo 'Running buildozer...'
+            echo 'Pre-accepting Android SDK licenses...'
+            # Set up Android SDK environment
+            export ANDROID_HOME=/root/.buildozer/android/platform/android-sdk
+            export ANDROID_SDK_ROOT=\$ANDROID_HOME
+            export PATH=\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$PATH
+            
+            # Let buildozer download SDK first, then accept licenses
+            echo 'Running buildozer to download SDK...'
+            set +e  # Disable exit on error for SDK setup phase
+            timeout 600 buildozer android debug --verbose 2>&1 | tee buildozer_output.log || echo 'SDK download phase completed'
+            set -e  # Re-enable exit on error
+            
+            # Find and run sdkmanager to accept licenses
+            echo 'Looking for sdkmanager...'
+            SDKMANAGER=\$(find /root/.buildozer -name 'sdkmanager' -type f 2>/dev/null | head -1)
+            if [ -n \"\$SDKMANAGER\" ]; then
+              echo \"Found sdkmanager at: \$SDKMANAGER\"
+              echo 'Accepting all Android SDK licenses...'
+              yes | \$SDKMANAGER --licenses || echo 'License acceptance completed'
+              
+              # Install required SDK components with correct versions
+              echo 'Installing required SDK components...'
+              \$SDKMANAGER \
+                'platforms;android-30' \
+                'platforms;android-21' \
+                'build-tools;30.0.3' \
+                'platform-tools' \
+                'cmake;3.10.2.4988404' || echo 'SDK components installation completed'
+            else
+              echo 'WARNING: sdkmanager not found, licenses may not be accepted'
+            fi
+            
+            echo 'Running final buildozer build...'
             buildozer android debug --verbose
           " 2>&1; then
           
