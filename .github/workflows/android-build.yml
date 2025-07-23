@@ -172,43 +172,50 @@ jobs:
             echo 'Build completed. Checking for APK in bin directory...'
             ls -la bin/ || echo 'No bin directory found'
             find . -name '*.apk' -type f
-          " 2>&1 | tee build.log
+          "
           
-        # Check if build succeeded
-        BUILD_EXIT_CODE=$?
-        if [ $BUILD_EXIT_CODE -ne 0 ]; then
-          echo "❌ Buildozer build failed with exit code $BUILD_EXIT_CODE"
-          echo "Last 100 lines of build.log:"
-          tail -100 build.log
+        # Check if Docker command succeeded (removed tee to preserve exit code)
+        DOCKER_EXIT_CODE=$?
+        if [ $DOCKER_EXIT_CODE -ne 0 ]; then
+          echo "❌ Docker build failed with exit code $DOCKER_EXIT_CODE"
           exit 1
         fi
         
         echo "✅ Buildozer Docker build completed successfully!"
         
-        # APK should now be in the bin directory on the host
-        echo "Searching for APK files in current directory:"
+        # The APK was created inside the container at /workspace/bin/
+        # Since we mounted $PWD as /workspace, it should be in ./bin/
+        echo "Checking for APK files created by Docker build:"
+        echo "Current directory contents:"
         ls -la
-        echo "Checking bin directory:"
-        ls -la bin/ || echo "No bin directory found"
-        echo "Searching for all APK files:"
-        find . -name "*.apk" -type f
+        echo "Checking bin directory (created by buildozer inside container):"
+        ls -la bin/ 2>/dev/null || echo "No bin directory found on host"
+        echo "Searching for all APK files in workspace:"
+        find . -name "*.apk" -type f 2>/dev/null || echo "No APK files found"
         
-        # Search for APK files
-        APK_FILE=$(find . -name "*.apk" -type f | head -1)
+        # The APK should be in bin/ directory, but let's check everywhere just in case
+        APK_FILE=$(find bin -name "*.apk" -type f 2>/dev/null | head -1)
+        
+        # If not in bin/, search the entire workspace
+        if [ -z "$APK_FILE" ]; then
+          echo "APK not found in bin/, searching entire workspace..."
+          APK_FILE=$(find . -name "*.apk" -type f 2>/dev/null | head -1)
+        fi
         
         if [ -n "$APK_FILE" ]; then
           echo "✅ Found APK: $APK_FILE"
-          mkdir -p bin # Ensure bin directory exists in the host machine
-          cp "$APK_FILE" bin/testapp-debug.apk # Standardize the output name
+          # Ensure we have a standard location for upload
+          mkdir -p Android/bin
+          cp "$APK_FILE" Android/bin/testapp-debug.apk
           echo "✅ Copied APK to Android/bin/testapp-debug.apk for upload"
-          ls -la bin/
-          echo "APK size: $(du -h bin/testapp-debug.apk)"
+          ls -la Android/bin/
+          echo "APK size: $(du -h Android/bin/testapp-debug.apk)"
         else
-          echo "❌ No APK file found after Docker build. Check build.log for errors."
-          # Display more context from build.log if APK is not found
-          echo "Last 200 lines of build.log:"
-          tail -200 build.log
-          exit 1 # Fail the workflow if no APK is found
+          echo "❌ No APK file found after Docker build."
+          echo "This is unexpected since the build reported success."
+          echo "Docker build output showed APK created, but it's not accessible on host."
+          echo "This might be a volume mounting issue."
+          exit 1
         fi
     
     - name: Upload APK
