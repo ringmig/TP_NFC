@@ -1,8 +1,9 @@
 name: Build Android APK (Docker)
+
 on:
   push:
     branches:
-      - master
+      - master # Ensure this matches your default branch (e.g., main or master)
   pull_request:
     branches:
       - master
@@ -15,26 +16,22 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Check Docker availability
-      run: |
-        echo "Checking Docker setup on GitHub Actions runner..."
-        docker --version
-        docker info || echo "Docker info failed, but continuing..."
-        echo "Available Docker images:"
-        docker images | head -10
-    
     - name: Prepare buildozer.spec for Docker build
-      working-directory: Android
+      working-directory: Android # Assuming your buildozer.spec is in 'Android'
       run: |
         echo "Preparing buildozer.spec for Docker environment..."
         
-        # Ensure correct settings for Docker buildozer (use build-tools that buildozer expects)
+        # Ensure correct settings for buildozer.
+        # The Docker image handles SDK/NDK installation, but buildozer.spec still needs target versions.
+        # We'll stick to widely compatible versions for the pre-built image.
         sed -i 's/^android\.api = .*/android.api = 30/' buildozer.spec
         sed -i 's/^android\.ndk = .*/android.ndk = 25b/' buildozer.spec  
         sed -i 's/^android\.minapi = .*/android.minapi = 21/' buildozer.spec
         sed -i 's/^android\.sdk = .*/android.sdk = 30/' buildozer.spec
-        sed -i 's/^android\.build_tools = .*/android.build_tools = 36.0.0/' buildozer.spec
-        sed -i 's/^android\.archs = .*/android.archs = armeabi-v7a/' buildozer.spec
+        # The build-tools version might be managed by the Docker image, but setting it explicitly
+        # in spec can help if buildozer tries to verify it. Use 30.0.3, a common stable one.
+        sed -i 's/^android\.build_tools = .*/android.build_tools = 30.0.3/' buildozer.spec
+        sed -i 's/^android\.archs = .*/android.archs = armeabi-v7a/' buildozer.spec # Single arch for simplicity
         
         # Use stable Kivy version
         sed -i 's/^requirements = .*/requirements = python3,kivy==2.1.0/' buildozer.spec
@@ -49,168 +46,50 @@ jobs:
         echo "Final buildozer.spec configuration:"
         grep -E "android\.(api|sdk|ndk|minapi|archs|build_tools|enable_androidx)|requirements" buildozer.spec
     
-    - name: Build APK using Docker
-      working-directory: Android
+    - name: Build APK using Kivy Buildozer Docker image
+      working-directory: Android # Execute buildozer from the 'Android' directory
       run: |
-        echo "Building APK using buildozer Docker image..."
-        echo "Current directory contents:"
-        ls -la
+        echo "Building APK using kivy/buildozer:stable Docker image..."
         
-        # Create output directory
-        mkdir -p bin
-        
-        # Try Docker-based build with custom Ubuntu container
-        BUILD_SUCCESS=false
-        
-        echo "Attempting Docker-based build with custom Ubuntu container..."
-        
-        if docker run --rm \
-          -v "$PWD":/workspace \
-          --workdir /workspace \
-          ubuntu:20.04 bash -c "
-            set -e
-            echo 'Installing system dependencies...'
-            apt-get update -qq
-            apt-get install -y python3 python3-pip openjdk-8-jdk-headless git unzip wget curl build-essential
-            
-            echo 'Installing Python packages...'
-            pip3 install buildozer==1.5.0 cython==0.29.33
-            
-            echo 'Setting Java environment...'
-            export JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
-            export PATH=\$JAVA_HOME/bin:\$PATH
-            java -version
-            
-            echo 'Setting up Android SDK manually to avoid license issues...'
-            
-            # Create Android SDK directory structure
-            export ANDROID_HOME=/root/.buildozer/android/platform/android-sdk
-            export ANDROID_SDK_ROOT=\$ANDROID_HOME
-            mkdir -p \$ANDROID_HOME/cmdline-tools
-            
-            # Download and setup Android command-line tools
-            echo 'Downloading Android command-line tools...'
-            cd /tmp
-            wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip
-            unzip -q commandlinetools-linux-9477386_latest.zip
-            mv cmdline-tools \$ANDROID_HOME/cmdline-tools/latest
-            cd /workspace
-            
-            # Set PATH for SDK tools (include both build-tools versions)
-            export PATH=\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$ANDROID_HOME/build-tools/36.0.0:\$ANDROID_HOME/build-tools/30.0.3:\$PATH
-            
-            # Accept all licenses FIRST
-            echo 'Accepting Android SDK licenses upfront...'
-            yes | sdkmanager --licenses || echo 'License acceptance completed'
-            
-            # Install required SDK components with exact versions that buildozer expects
-            echo 'Installing required Android SDK components...'
-            
-            # First check what build-tools versions are available
-            echo 'Available build-tools versions:'
-            sdkmanager --list | grep build-tools | head -10 || echo 'Could not list build-tools'
-            
-            # Install both the version we want AND the version buildozer might expect
-            sdkmanager \
-              'platforms;android-30' \
-              'platforms;android-21' \
-              'build-tools;30.0.3' \
-              'build-tools;36.0.0' \
-              'platform-tools' \
-              'cmake;3.10.2.4988404' || echo 'SDK components installation completed'
-            
-            # Verify installation
-            echo 'Verifying SDK installation...'
-            ls -la \$ANDROID_HOME/platforms/ || echo 'No platforms directory'
-            ls -la \$ANDROID_HOME/build-tools/ || echo 'No build-tools directory'
-            ls -la \$ANDROID_HOME/build-tools/36.0.0/ || echo 'No build-tools 36.0.0 directory'
-            ls -la \$ANDROID_HOME/build-tools/30.0.3/ || echo 'No build-tools 30.0.3 directory'
-            find \$ANDROID_HOME -name 'aidl' -type f | head -5 || echo 'aidl not found'
-            
-            # Specifically check that aidl is accessible in PATH
-            which aidl || echo 'aidl not in PATH'
-            \$ANDROID_HOME/build-tools/36.0.0/aidl --help || echo 'aidl 36.0.0 not working'
-            
-            # Force buildozer to use our pre-installed SDK
-            echo 'Configuring buildozer to use pre-installed SDK...'
-            export ANDROIDAPI=30
-            export ANDROIDMINAPI=21
-            export ANDROIDSDK=\$ANDROID_HOME
-            export ANDROIDNDK=\$ANDROID_HOME/ndk-bundle
-            
-            # Clean any partial buildozer cache
-            rm -rf .buildozer/android/platform/build-* || true
-            rm -rf .buildozer/android/platform/dists || true
-            
-            echo 'Running buildozer with pre-configured SDK...'
-            buildozer android debug --verbose
-          " 2>&1; then
-          
-          echo "✅ Build succeeded with custom Ubuntu container"
-          BUILD_SUCCESS=true
-        else
-          echo "❌ Custom Ubuntu container build failed"
-        fi
-        
-        if [ "$BUILD_SUCCESS" != "true" ]; then
-          echo "❌ All Docker images failed. Falling back to manual buildozer installation..."
-          
-          # Install buildozer manually as fallback
-          sudo apt-get update
-          sudo apt-get install -y python3-pip openjdk-11-jdk unzip
-          pip3 install buildozer==1.5.0 cython==0.29.33
-          
-          # Set JAVA_HOME
-          export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-          
-          # Try building with installed buildozer
-          buildozer android debug || {
-            echo "❌ Fallback buildozer also failed"
+        # The kivy/buildozer image has all dependencies pre-installed and licenses accepted.
+        # We just need to run buildozer from within the container.
+        # Mount the current directory (which contains buildozer.spec and your app code)
+        # to /home/user/app inside the container.
+        docker run --rm \
+          -v "$PWD":/home/user/app \
+          -w /home/user/app \
+          kivy/buildozer:stable \
+          buildozer android debug --verbose 2>&1 | tee build.log || {
+            echo "Buildozer Docker build failed! See build.log for details."
+            tail -500 build.log
             exit 1
           }
-        fi
           
-        echo "Docker build completed. Searching for APK..."
+        echo "Buildozer Docker build completed. Searching for APK..."
         
-        # Search for APK files in multiple locations
-        APK_FILE=""
-        
-        # Method 1: Look in current directory
+        # Search for APK files. Buildozer usually places them in bin/ or .buildozer/bin/
+        # or .buildozer/android/platform/build-*/dists/your_app_name/
         APK_FILE=$(find . -name "*.apk" -type f | head -1)
-        
-        # Method 2: Look in .buildozer directory
-        if [ -z "$APK_FILE" ]; then
-          APK_FILE=$(find .buildozer -name "*.apk" -type f 2>/dev/null | head -1)
-        fi
-        
-        # Method 3: Look in bin directory (buildozer default output)
-        if [ -z "$APK_FILE" ]; then
-          APK_FILE=$(find bin -name "*.apk" -type f 2>/dev/null | head -1)
-        fi
         
         if [ -n "$APK_FILE" ]; then
           echo "✅ Found APK: $APK_FILE"
-          # Copy to standardized location if not already there
-          if [ "$APK_FILE" != "bin/testapp-debug.apk" ]; then
-            cp "$APK_FILE" bin/testapp-debug.apk
-            echo "✅ Copied APK to bin/testapp-debug.apk"
-          fi
+          mkdir -p bin # Ensure bin directory exists in the host machine
+          cp "$APK_FILE" bin/testapp-debug.apk # Standardize the output name
+          echo "✅ Copied APK to Android/bin/testapp-debug.apk for upload"
           ls -la bin/
           echo "APK size: $(du -h bin/testapp-debug.apk)"
         else
-          echo "❌ No APK file found after Docker build"
-          echo "Docker build may have failed. Checking directory structure..."
-          echo "Current directory:"
-          find . -type f -name "*.apk" -o -name "*.log" | head -20
-          echo "Buildozer directory:"
-          find .buildozer -type f -name "*.apk" -o -name "*.log" 2>/dev/null | head -20 || echo "No .buildozer directory"
-          exit 1
+          echo "❌ No APK file found after Docker build. Check build.log for errors."
+          # Display more context from build.log if APK is not found
+          echo "Last 200 lines of build.log:"
+          tail -200 build.log
+          exit 1 # Fail the workflow if no APK is found
         fi
     
     - name: Upload APK
       uses: actions/upload-artifact@v4
-      if: success()
+      if: success() # Only upload if the previous steps succeeded
       with:
         name: android-apk-testapp-docker
-        path: Android/bin/testapp-debug.apk
-        if-no-files-found: fail
+        path: Android/bin/testapp-debug.apk # Point to the standardized location
+        if-no-files-found: fail # Fail the workflow if the APK is still not found here
