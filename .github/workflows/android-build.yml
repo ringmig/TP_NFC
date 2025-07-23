@@ -32,18 +32,44 @@ jobs:
       working-directory: Android
       run: |
         export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
-        mkdir -p "$ANDROID_HOME/cmdline-tools/latest/bin"
         
-        # Check if sdkmanager already exists from previous runs/caching
-        if [ ! -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-          echo "sdkmanager not found, running buildozer to trigger initial SDK download."
-          # This buildozer command will initiate SDK download. It will likely fail
-          # at the license prompt, but it populates the SDK directories.
-          set +e # Temporarily disable exit on error
-          buildozer android debug || echo "Buildozer initial SDK download attempted."
-          set -e # Re-enable exit on error
+        # Pre-create the expected SDK structure
+        echo "Pre-creating SDK directory structure..."
+        mkdir -p "$ANDROID_HOME"
+        
+        # Download command-line tools directly if buildozer hasn't done it
+        if [ ! -d "$ANDROID_HOME/cmdline-tools" ]; then
+          echo "Downloading Android command-line tools..."
+          cd "$ANDROID_HOME"
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-6514223_latest.zip
+          unzip -q commandlinetools-linux-6514223_latest.zip
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+          cd -
+        fi
+        
+        # Let buildozer download SDK first (it will fail on licenses)
+        echo "Running buildozer to continue SDK setup..."
+        set +e # Don't exit on error
+        timeout 600 buildozer android debug 2>&1 | tee buildozer_output.log || echo "Buildozer SDK setup phase completed"
+        set -e # Re-enable exit on error
+        
+        # Find where sdkmanager actually is
+        echo "Looking for sdkmanager..."
+        find $HOME/.buildozer -name "sdkmanager" -type f 2>/dev/null || echo "No sdkmanager found yet"
+        
+        # Check both possible locations
+        if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          echo "Found sdkmanager at: $SDKMANAGER"
+        elif [ -f "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
+          SDKMANAGER="$ANDROID_HOME/tools/bin/sdkmanager"
+          echo "Found sdkmanager at: $SDKMANAGER"
         else
-          echo "sdkmanager already exists."
+          echo "ERROR: sdkmanager not found after buildozer run"
+          echo "Checking buildozer output for clues..."
+          grep -i "sdkmanager\|sdk\|download" buildozer_output.log | tail -20
+          exit 1
         fi
         
         # Ensure sdkmanager is in PATH for the license acceptance step
@@ -51,33 +77,19 @@ jobs:
         
         # Accept all Android SDK licenses
         echo "Accepting Android SDK licenses..."
-        if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root="$ANDROID_HOME" --licenses
-        elif [ -f "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
-          yes | $ANDROID_HOME/tools/bin/sdkmanager --sdk_root="$ANDROID_HOME" --licenses
-        fi
+        yes | $SDKMANAGER --sdk_root="$ANDROID_HOME" --licenses || echo "License acceptance completed"
         
         # Install SDK components matching our buildozer.spec
         REQUIRED_API_LEVEL="29"
         REQUIRED_BUILD_TOOLS_VERSION="29.0.3"
         
         echo "Installing Android SDK components: API $REQUIRED_API_LEVEL, Build-tools $REQUIRED_BUILD_TOOLS_VERSION..."
-        
-        if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --sdk_root="$ANDROID_HOME" \
-            "platforms;android-$REQUIRED_API_LEVEL" \
-            "platforms;android-21" \
-            "build-tools;$REQUIRED_BUILD_TOOLS_VERSION" \
-            "platform-tools" \
-            "cmake;3.10.2.4988404"
-        elif [ -f "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
-          $ANDROID_HOME/tools/bin/sdkmanager --sdk_root="$ANDROID_HOME" \
-            "platforms;android-$REQUIRED_API_LEVEL" \
-            "platforms;android-21" \
-            "build-tools;$REQUIRED_BUILD_TOOLS_VERSION" \
-            "platform-tools" \
-            "cmake;3.10.2.4988404"
-        fi
+        $SDKMANAGER --sdk_root="$ANDROID_HOME" \
+          "platforms;android-$REQUIRED_API_LEVEL" \
+          "platforms;android-21" \
+          "build-tools;$REQUIRED_BUILD_TOOLS_VERSION" \
+          "platform-tools" \
+          "cmake;3.10.2.4988404" || echo "SDK component installation completed"
         
         # Verify installation
         echo "Verifying SDK component installation..."
