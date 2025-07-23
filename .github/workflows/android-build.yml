@@ -215,7 +215,15 @@ jobs:
 
         # Clean buildozer cache to ensure a fresh build with the pre-installed SDK/NDK
         echo "Cleaning buildozer cache..."
-        buildozer android clean
+        if [ -d ".buildozer/android/platform/python-for-android" ]; then
+          echo "Found existing python-for-android, cleaning..."
+          buildozer android clean
+        else
+          echo "No existing python-for-android found, skipping clean (first build)"
+          # Just remove any partial build directories if they exist
+          rm -rf .buildozer/android/platform/build-* || echo "No build directories to clean"
+          rm -rf .buildozer/android/platform/dists || echo "No dists directory to clean"
+        fi
 
         # Force single architecture if needed, but your spec now includes both.
         # If you only want one, uncomment and adjust:
