@@ -41,7 +41,8 @@ jobs:
     - name: Install Python packages
       run: |
         pip install --upgrade pip
-        pip install buildozer==1.4.0 cython==0.29.33
+        pip install buildozer==1.5.0 cython==0.29.33
+        pip install colorama
         
     - name: Pre-setup Android SDK for license acceptance
       working-directory: Android
@@ -150,13 +151,22 @@ jobs:
         export ACLOCAL_PATH="/usr/share/aclocal"
         export ACLOCAL="aclocal -I /usr/share/aclocal"
         
-        # Ensure buildozer.spec has correct values (force update)
+# Ensure buildozer.spec has correct values (force update)
         echo "Updating buildozer.spec to ensure correct values..."
         sed -i 's/^android\.api = .*/android.api = 30/' buildozer.spec
         sed -i 's/^android\.ndk = .*/android.ndk = 25b/' buildozer.spec  
         sed -i 's/^android\.minapi = .*/android.minapi = 23/' buildozer.spec
         sed -i 's/^android\.sdk = .*/android.sdk = 30/' buildozer.spec
         sed -i 's/^android\.build_tools = .*/android.build_tools = 30.0.3/' buildozer.spec
+        sed -i 's/^android\.archs = .*/android.archs = armeabi-v7a/' buildozer.spec
+        
+        # Add p4a source and fork for better compatibility
+        if ! grep -q "p4a.source_dir" buildozer.spec; then
+          echo "p4a.source_dir = " >> buildozer.spec
+        fi
+        if ! grep -q "p4a.local_recipes" buildozer.spec; then
+          echo "p4a.local_recipes = " >> buildozer.spec
+        fi
         
         # Show final buildozer configuration
         echo "Final buildozer configuration:"
@@ -170,9 +180,13 @@ jobs:
         echo "JAVA_HOME=$JAVA_HOME"
         java -version
         
-        # Clean buildozer cache to ensure new settings are used
+# Clean buildozer cache to ensure new settings are used
         rm -rf .buildozer/android/platform/build-*
         rm -rf .buildozer/android/platform/dists
+        
+        # Force single architecture to avoid conflicts
+        export P4A_ARCHS="armeabi-v7a"
+        export ARCH="armeabi-v7a"
         
         # Clean and build with maximum verbosity
         buildozer android clean
