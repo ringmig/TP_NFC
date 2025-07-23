@@ -202,12 +202,28 @@ jobs:
         
         # If build succeeded, show what was created
         echo "Build completed successfully!"
-        echo "Listing created APK files:"
-        find . -name "*.apk" -type f -ls 2>/dev/null || echo "No APK files found"
+        echo "Searching for APK files in all locations..."
+        find . -name "*.apk" -type f -ls 2>/dev/null || echo "No APK files found in current directory"
+        find $HOME/.buildozer -name "*.apk" -type f -ls 2>/dev/null || echo "No APK files found in buildozer cache"
+        
+        # Create bin directory and copy APK there for upload
+        mkdir -p bin/
+        APK_FILE=$(find . -name "*.apk" -type f | head -1)
+        if [ -n "$APK_FILE" ]; then
+          echo "Found APK: $APK_FILE"
+          cp "$APK_FILE" bin/
+          echo "Copied APK to bin/ for upload"
+          ls -la bin/
+        else
+          echo "No APK file found to copy"
+        fi
         
     - name: Upload APK
       uses: actions/upload-artifact@v4
       if: success()
       with:
-        name: android-apk
-        path: Android/bin/*.apk
+        name: android-apk-testapp
+        path: |
+          Android/bin/*.apk
+          Android/.buildozer/android/platform/build-*/dists/testapp/dist/*.apk
+          Android/.buildozer/android/platform/build-*/dists/testapp/*.apk
