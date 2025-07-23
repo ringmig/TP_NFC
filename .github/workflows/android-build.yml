@@ -38,7 +38,31 @@ jobs:
         # Clean any previous builds
         buildozer android clean || true
         
-        # Build APK
+        # Start buildozer to trigger SDK download (will fail at license step)
+        echo "Starting buildozer to download SDK..."
+        timeout 600 buildozer android debug || echo "Buildozer stopped at license prompt (expected)"
+        
+        # Accept licenses at buildozer's SDK location
+        echo "Accepting Android SDK licenses..."
+        if [ -f .buildozer/android/platform/android-sdk/tools/bin/sdkmanager ]; then
+          yes | .buildozer/android/platform/android-sdk/tools/bin/sdkmanager --licenses
+        elif [ -f .buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ]; then
+          yes | .buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+        else
+          echo "ERROR: No sdkmanager found in buildozer SDK"
+          find .buildozer -name "sdkmanager" -type f 2>/dev/null || echo "No sdkmanager found anywhere"
+        fi
+        
+        # Install required build tools explicitly
+        echo "Installing build-tools..."
+        if [ -f .buildozer/android/platform/android-sdk/tools/bin/sdkmanager ]; then
+          .buildozer/android/platform/android-sdk/tools/bin/sdkmanager "build-tools;27.0.3"
+        elif [ -f .buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ]; then
+          .buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager "build-tools;27.0.3"
+        fi
+        
+        # Now continue with the build
+        echo "Resuming buildozer build..."
         buildozer android debug
         
     - name: Upload APK
