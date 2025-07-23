@@ -28,12 +28,12 @@ jobs:
       run: |
         echo "Preparing buildozer.spec for Docker environment..."
         
-        # Ensure correct settings for Docker buildozer
+        # Ensure correct settings for Docker buildozer (use build-tools that buildozer expects)
         sed -i 's/^android\.api = .*/android.api = 30/' buildozer.spec
         sed -i 's/^android\.ndk = .*/android.ndk = 25b/' buildozer.spec  
         sed -i 's/^android\.minapi = .*/android.minapi = 21/' buildozer.spec
         sed -i 's/^android\.sdk = .*/android.sdk = 30/' buildozer.spec
-        sed -i 's/^android\.build_tools = .*/android.build_tools = 30.0.3/' buildozer.spec
+        sed -i 's/^android\.build_tools = .*/android.build_tools = 36.0.0/' buildozer.spec
         sed -i 's/^android\.archs = .*/android.archs = armeabi-v7a/' buildozer.spec
         
         # Use stable Kivy version
@@ -96,19 +96,26 @@ jobs:
             mv cmdline-tools \$ANDROID_HOME/cmdline-tools/latest
             cd /workspace
             
-            # Set PATH for SDK tools
-            export PATH=\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$ANDROID_HOME/build-tools/30.0.3:\$PATH
+            # Set PATH for SDK tools (include both build-tools versions)
+            export PATH=\$ANDROID_HOME/cmdline-tools/latest/bin:\$ANDROID_HOME/platform-tools:\$ANDROID_HOME/build-tools/36.0.0:\$ANDROID_HOME/build-tools/30.0.3:\$PATH
             
             # Accept all licenses FIRST
             echo 'Accepting Android SDK licenses upfront...'
             yes | sdkmanager --licenses || echo 'License acceptance completed'
             
-            # Install required SDK components with exact versions
+            # Install required SDK components with exact versions that buildozer expects
             echo 'Installing required Android SDK components...'
+            
+            # First check what build-tools versions are available
+            echo 'Available build-tools versions:'
+            sdkmanager --list | grep build-tools | head -10 || echo 'Could not list build-tools'
+            
+            # Install both the version we want AND the version buildozer might expect
             sdkmanager \
               'platforms;android-30' \
               'platforms;android-21' \
               'build-tools;30.0.3' \
+              'build-tools;36.0.0' \
               'platform-tools' \
               'cmake;3.10.2.4988404' || echo 'SDK components installation completed'
             
@@ -116,7 +123,13 @@ jobs:
             echo 'Verifying SDK installation...'
             ls -la \$ANDROID_HOME/platforms/ || echo 'No platforms directory'
             ls -la \$ANDROID_HOME/build-tools/ || echo 'No build-tools directory'
+            ls -la \$ANDROID_HOME/build-tools/36.0.0/ || echo 'No build-tools 36.0.0 directory'
+            ls -la \$ANDROID_HOME/build-tools/30.0.3/ || echo 'No build-tools 30.0.3 directory'
             find \$ANDROID_HOME -name 'aidl' -type f | head -5 || echo 'aidl not found'
+            
+            # Specifically check that aidl is accessible in PATH
+            which aidl || echo 'aidl not in PATH'
+            \$ANDROID_HOME/build-tools/36.0.0/aidl --help || echo 'aidl 36.0.0 not working'
             
             # Force buildozer to use our pre-installed SDK
             echo 'Configuring buildozer to use pre-installed SDK...'
