@@ -52,7 +52,7 @@ jobs:
       run: |
         echo "Building APK using Docker with custom buildozer setup..."
         
-        # Create a simple Dockerfile for buildozer
+        # Create a comprehensive Dockerfile for buildozer with pre-installed Android SDK
         cat > Dockerfile << 'EOF'
         FROM ubuntu:20.04
         
@@ -83,12 +83,42 @@ jobs:
         ENV JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64
         ENV PATH=$JAVA_HOME/bin:$PATH
         
-        # Install buildozer and dependencies as builduser
+        # Switch to builduser for remaining operations
         USER builduser
+        WORKDIR /home/builduser
+        
+        # Install buildozer and dependencies
         RUN pip3 install --user buildozer==1.5.0 cython==0.29.33
         ENV PATH=/home/builduser/.local/bin:$PATH
         
-        # Set working directory
+        # Pre-install Android SDK to avoid license issues
+        ENV ANDROID_HOME=/home/builduser/.buildozer/android/platform/android-sdk
+        ENV ANDROID_SDK_ROOT=$ANDROID_HOME
+        ENV PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/build-tools/30.0.3:$PATH
+        
+        # Create Android SDK directory structure
+        RUN mkdir -p $ANDROID_HOME/cmdline-tools
+        
+        # Download and install Android command-line tools
+        RUN cd /tmp && \
+            wget -q https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip && \
+            unzip -q commandlinetools-linux-9477386_latest.zip && \
+            mv cmdline-tools $ANDROID_HOME/cmdline-tools/latest && \
+            rm commandlinetools-linux-9477386_latest.zip
+        
+        # Accept licenses and install required SDK components
+        RUN yes | sdkmanager --licenses && \
+            sdkmanager \
+                "platforms;android-30" \
+                "platforms;android-21" \
+                "build-tools;30.0.3" \
+                "platform-tools" \
+                "cmake;3.10.2.4988404"
+        
+        # Verify aidl is accessible
+        RUN which aidl || find $ANDROID_HOME -name "aidl" -type f | head -1
+        
+        # Set working directory for builds
         WORKDIR /workspace
         
         # Default command
@@ -103,15 +133,31 @@ jobs:
         # Make sure the workspace has proper permissions
         sudo chown -R 1000:1000 .
         
+        # Run buildozer with proper environment
         docker run --rm \
           -v "$PWD":/workspace \
           -w /workspace \
           -u builduser \
+          -e ANDROID_HOME=/home/builduser/.buildozer/android/platform/android-sdk \
+          -e ANDROID_SDK_ROOT=/home/builduser/.buildozer/android/platform/android-sdk \
+          -e PATH="/home/builduser/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin:/home/builduser/.buildozer/android/platform/android-sdk/platform-tools:/home/builduser/.buildozer/android/platform/android-sdk/build-tools/30.0.3:/home/builduser/.local/bin:/usr/lib/jvm/java-8-openjdk-amd64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
           custom-buildozer \
-          buildozer android debug --verbose 2>&1 | tee build.log || {
+          bash -c "
+            echo 'Verifying Android SDK setup...'
+            ls -la \$ANDROID_HOME/build-tools/ || echo 'No build-tools directory'
+            find \$ANDROID_HOME -name 'aidl' -type f | head -5 || echo 'aidl not found'
+            which aidl || echo 'aidl not in PATH'
+            
+            echo 'Running buildozer...'
+            buildozer android debug --verbose
+          " 2>&1 | tee build.log || {
             echo "Buildozer Docker build failed! See build.log for details."
-            echo "Last 500 lines of build.log:"
-            tail -500 build.log
+            if [ -f build.log ]; then
+              echo "Last 500 lines of build.log:"
+              tail -500 build.log
+            else
+              echo "build.log file not found"
+            fi
             exit 1
           }
           
