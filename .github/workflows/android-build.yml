@@ -26,8 +26,18 @@ jobs:
         
     - name: Setup buildozer
       run: |
+        echo "🐍 Installing Python dependencies..."
         pip install --upgrade pip
         pip install buildozer==1.4.0 cython==0.29.33
+        
+        echo "✅ Buildozer installation complete"
+        buildozer version
+        
+        echo "☕ Java version:"
+        java -version
+        
+        echo "🐍 Python version:"
+        python --version
         
     - name: Cache buildozer global directory
       uses: actions/cache@v3
@@ -39,13 +49,26 @@ jobs:
           
     - name: Build APK
       working-directory: Android
+      timeout-minutes: 45
       run: |
+        echo "🚀 Starting APK build process..."
+        
         # Set environment variables
         export ANDROID_ARCH=arm64-v8a
         export P4A_ARCH=arm64-v8a
+        export BUILDOZER_LOG_LEVEL=2
         
-        # Build
-        buildozer android debug
+        echo "📱 Environment configured for Android build"
+        echo "🔧 Current directory: $(pwd)"
+        echo "📋 Buildozer spec file:"
+        head -20 buildozer.spec
+        
+        echo "🏗️ Starting buildozer android debug..."
+        buildozer android debug -v
+        
+        echo "✅ Build completed!"
+        echo "📦 Checking for APK files:"
+        find . -name "*.apk" -ls
         
     - name: Upload APK
       uses: actions/upload-artifact@v4
