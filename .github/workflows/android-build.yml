@@ -42,7 +42,30 @@ jobs:
     - name: Build APK  
       working-directory: Android
       run: |
-        # Build with single architecture to avoid toolchain conflicts
+        # Start buildozer to let it download SDK first
+        echo "Starting buildozer to setup SDK..."
+        timeout 300 buildozer android debug || echo "Initial build started SDK setup"
+        
+        # Now accept licenses for buildozer's SDK location
+        if [ -d .buildozer/android/platform/android-sdk ]; then
+          echo "Accepting licenses for project buildozer SDK..."
+          mkdir -p .buildozer/android/platform/android-sdk/licenses
+          echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > .buildozer/android/platform/android-sdk/licenses/android-sdk-license
+          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> .buildozer/android/platform/android-sdk/licenses/android-sdk-license
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" >> .buildozer/android/platform/android-sdk/licenses/android-sdk-license
+          
+          # Try to install the correct build tools
+          if [ -f .buildozer/android/platform/android-sdk/tools/bin/sdkmanager ]; then
+            .buildozer/android/platform/android-sdk/tools/bin/sdkmanager --sdk_root=.buildozer/android/platform/android-sdk "build-tools;28.0.3" || echo "SDK manager method 1 failed"
+          fi
+          
+          if [ -f .buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager ]; then
+            .buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager --sdk_root=.buildozer/android/platform/android-sdk "build-tools;28.0.3" || echo "SDK manager method 2 failed"
+          fi
+        fi
+        
+        # Continue with the build
+        echo "Continuing buildozer build..."
         buildozer android debug
         
     - name: Upload APK
