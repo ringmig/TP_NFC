@@ -127,5 +127,9 @@ class UnifiedNFCService:
     def is_connected(self) -> bool:
         """Check if connected to reader."""
         if self.backend_service:
-            return self.backend_service.is_connected
+            # Use check_connection method if available for real-time status
+            if hasattr(self.backend_service, 'check_connection'):
+                return self.backend_service.check_connection()
+            else:
+                return self.backend_service.is_connected
         return False

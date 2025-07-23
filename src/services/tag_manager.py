@@ -49,21 +49,56 @@ class TagManager:
         self.check_in_queue.set_sync_completion_callback(callback)
 
     def load_registry(self) -> None:
-        """Load tag registry from file."""
+        """Load tag registry from file with backup recovery."""
         if self.registry_file.exists():
             try:
                 with open(self.registry_file, 'r') as f:
                     self.tag_registry = json.load(f)
-                self.logger.info(f"Loaded {len(self.tag_registry)} tag mappings: {self.tag_registry}")
+                self.logger.debug(f"Loaded {len(self.tag_registry)} tag mappings: {self.tag_registry}")
+                if len(self.tag_registry) > 0:
+                    self.logger.info(f"Loaded {len(self.tag_registry)} registered tags from registry")
             except Exception as e:
                 self.logger.error(f"Error loading tag registry: {e}")
+                # Try to recover from backup
+                self._recover_from_backup()
         else:
             self.logger.info("No registry file found, starting with empty registry")
 
+    def _recover_from_backup(self) -> None:
+        """Attempt to recover tag registry from backup file."""
+        backup_file = Path(str(self.registry_file) + ".backup")
+        if backup_file.exists():
+            try:
+                with open(backup_file, 'r') as f:
+                    self.tag_registry = json.load(f)
+                self.logger.info(f"Tag registry restored from backup - {len(self.tag_registry)} tags recovered")
+                
+                # Save the recovered data as new main file
+                self.save_registry()
+                self.logger.info("Backup data saved as new registry file")
+            except Exception as backup_error:
+                self.logger.error(f"Backup recovery failed: {backup_error}")
+                self.logger.info("Starting with empty registry")
+                self.tag_registry = {}
+        else:
+            self.logger.warning("No backup file available, starting with empty registry")
+            self.tag_registry = {}
+
     def save_registry(self) -> None:
-        """Save tag registry to file."""
+        """Save tag registry to file with backup."""
         try:
             self.registry_file.parent.mkdir(exist_ok=True)
+            
+            # Create backup if main file exists and is not empty
+            backup_file = Path(str(self.registry_file) + ".backup")
+            if self.registry_file.exists() and self.registry_file.stat().st_size > 0:
+                try:
+                    backup_file.write_text(self.registry_file.read_text())
+                    self.logger.debug(f"Created backup: {backup_file}")
+                except Exception as backup_error:
+                    self.logger.warning(f"Failed to create backup: {backup_error}")
+            
+            # Save main file
             with open(self.registry_file, 'w') as f:
                 json.dump(self.tag_registry, f, indent=2)
             self.logger.debug(f"Saved registry with {len(self.tag_registry)} tags: {self.tag_registry}")

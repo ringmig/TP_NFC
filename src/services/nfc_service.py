@@ -118,6 +118,27 @@ class NFCService:
         thread.daemon = True
         thread.start()
         
+    def check_connection(self) -> bool:
+        """
+        Check if NFC reader is currently available.
+        
+        Returns:
+            bool: True if reader is available
+        """
+        try:
+            # If we don't have a connection, try to establish one
+            if not self.clf or not self.is_connected:
+                return self.connect()
+                
+            # Test if existing connection is still valid
+            # This is a simple way to check without full operation
+            return self.is_connected and self.clf is not None
+            
+        except Exception as e:
+            self.logger.debug(f"Connection check failed: {e}")
+            self.is_connected = False
+            return False
+        
     def write_data_to_tag(self, tag_uid: str, data: str) -> bool:
         """
         Write data to NFC tag (for future use).
