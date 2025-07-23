@@ -3,76 +3,48 @@ on: [push, pull_request]
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python 3.8
+    - name: Set up Python 3.9
       uses: actions/setup-python@v5
       with:
-        python-version: '3.8'
+        python-version: '3.9'
         
-    - name: Set up JDK 8
+    - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
-        java-version: '8'
+        java-version: '17'
         distribution: 'temurin'
         
     - name: Install system dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential git unzip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev
-        sudo apt-get install -y ccache ant wget curl lbzip2
         
-    - name: Setup buildozer
+    - name: Install buildozer dependencies
       run: |
-        echo "🐍 Installing Python dependencies..."
         pip install --upgrade pip
-        pip install buildozer==1.4.0 cython==0.29.33
+        pip install buildozer cython
         
-        echo "✅ Buildozer installation complete"
-        buildozer version
-        
-        echo "☕ Java version:"
-        java -version
-        
-        echo "🐍 Python version:"
-        python --version
-        
-    - name: Cache buildozer global directory
-      uses: actions/cache@v3
-      with:
-        path: ~/.buildozer
-        key: ${{ runner.os }}-buildozer-${{ hashFiles('Android/buildozer.spec') }}
-        restore-keys: |
-          ${{ runner.os }}-buildozer-
-          
-    - name: Build APK
-      working-directory: Android
-      timeout-minutes: 45
+    - name: Accept Android licenses (pre-setup)
       run: |
-        echo "🚀 Starting APK build process..."
+        mkdir -p "$HOME/.android"
+        echo '
+        8933bad161af4178b1185d1a37fbf41ea5269c55
+        d56f5187479451eabf01fb78af6dfcb131a6481e
+        24333f8a63b6825ea9c5514f83c2829b004d1fee' > "$HOME/.android/repositories.cfg"
         
-        # Set environment variables
-        export ANDROID_ARCH=arm64-v8a
-        export P4A_ARCH=arm64-v8a
-        export BUILDOZER_LOG_LEVEL=2
-        
-        echo "📱 Environment configured for Android build"
-        echo "🔧 Current directory: $(pwd)"
-        echo "📋 Buildozer spec file:"
-        head -20 buildozer.spec
-        
-        echo "🏗️ Starting buildozer android debug..."
-        buildozer android debug -v
-        
-        echo "✅ Build completed!"
-        echo "📦 Checking for APK files:"
-        find . -name "*.apk" -ls
+    - name: Build APK  
+      working-directory: Android
+      run: |
+        # Build with single architecture to avoid toolchain conflicts
+        buildozer android debug
         
     - name: Upload APK
       uses: actions/upload-artifact@v4
       if: success()
       with:
-        name: android-apk-${{ github.sha }}
+        name: android-apk
         path: Android/bin/*.apk

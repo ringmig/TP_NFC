@@ -50,6 +50,10 @@ android.ndk = 19c
 # (bool) Use --private data storage (True) or --dir public storage (False)
 android.private_storage = True
 
+# (list) The Android architectures to build for
+# available options: armeabi-v7a, arm64-v8a, x86, x86_64
+android.archs = arm64-v8a
+
 # (str) Android entry point, default is ok for Kivy-based app
 android.entrypoint = org.kivy.android.PythonActivity
 
