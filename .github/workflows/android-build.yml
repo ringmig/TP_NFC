@@ -3,10 +3,16 @@ name: Build Android APK (Docker)
 on:
   push:
     branches:
-      - master # Ensure this matches your default branch (e.g., main or master)
+      - master
+    paths:
+      - 'Android/**'
+      - '.github/workflows/android-build.yml'
   pull_request:
     branches:
       - master
+    paths:
+      - 'Android/**'
+      - '.github/workflows/android-build.yml'
   workflow_dispatch:
 
 jobs:
