@@ -47,6 +47,9 @@ android.sdk = 28
 # (str) Android NDK version to use
 android.ndk = 19c
 
+# (str) Android SDK build tools version to use
+android.build_tools = 28.0.3
+
 # (bool) Use --private data storage (True) or --dir public storage (False)
 android.private_storage = True
 
