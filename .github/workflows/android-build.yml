@@ -60,27 +60,41 @@ jobs:
         mkdir -p "$ANDROID_HOME/cmdline-tools"
 
         # Download and unzip latest command-line tools
-        # Using a specific version to ensure consistency
-        CMD_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-6514223_latest.zip"
+        # Using a more recent version that should have consistent structure
+        CMD_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
         echo "Downloading Android command-line tools from $CMD_TOOLS_URL"
         wget -q "$CMD_TOOLS_URL" -O /tmp/commandlinetools.zip
-        unzip -q /tmp/commandlinetools.zip -d /tmp/
         
-        # Check the actual structure and move accordingly
-        echo "Checking extracted structure..."
-        ls -la /tmp/cmdline-tools/ || echo "No cmdline-tools directory"
-        ls -la /tmp/ | grep cmdline || echo "No cmdline directory found"
+        # First, let's see what's actually in the zip file
+        echo "Contents of commandlinetools.zip:"
+        unzip -l /tmp/commandlinetools.zip | head -20
         
-        # Move the extracted tools to the correct location
-        if [ -d "/tmp/cmdline-tools" ]; then
-          mv /tmp/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+        # Extract to temporary location
+        unzip -q /tmp/commandlinetools.zip -d /tmp/cmdtools_extract/
+        
+        # Check what was actually extracted
+        echo "Checking extracted contents in /tmp/cmdtools_extract/:"
+        ls -la /tmp/cmdtools_extract/
+        
+        # Find the actual cmdline-tools directory
+        CMDTOOLS_DIR=$(find /tmp/cmdtools_extract -name "cmdline-tools" -type d | head -1)
+        if [ -z "$CMDTOOLS_DIR" ]; then
+          # If no cmdline-tools directory, look for any directory with bin/sdkmanager
+          CMDTOOLS_DIR=$(find /tmp/cmdtools_extract -name "sdkmanager" -type f | head -1 | xargs dirname | xargs dirname)
+        fi
+        
+        if [ -n "$CMDTOOLS_DIR" ] && [ -d "$CMDTOOLS_DIR" ]; then
+          echo "Found command-line tools at: $CMDTOOLS_DIR"
+          mv "$CMDTOOLS_DIR" "$ANDROID_HOME/cmdline-tools/latest"
         else
-          echo "ERROR: cmdline-tools directory not found in expected location"
-          ls -la /tmp/
+          echo "ERROR: Could not locate command-line tools in extracted files"
+          echo "Directory structure:"
+          find /tmp/cmdtools_extract -type f -name "*" | head -20
           exit 1
         fi
         
         rm /tmp/commandlinetools.zip
+        rm -rf /tmp/cmdtools_extract
         echo "Android command-line tools installed to $ANDROID_HOME/cmdline-tools/latest"
 
         # Add SDK tools to PATH for sdkmanager and other tools
