@@ -1,0 +1,20 @@
+# Core Kivy/KivyMD
+kivy>=2.1.0
+kivymd>=1.1.0
+
+# Build tools
+buildozer>=1.4.0
+cython>=0.29.0
+
+# Google Sheets API (same as desktop)
+google-api-python-client>=2.0.0
+google-auth-httplib2>=0.1.0
+google-auth-oauthlib>=0.5.0
+
+# Android-specific
+plyer>=2.1.0
+pyjnius>=1.4.0
+
+# Standard libraries
+requests>=2.25.0
+pathlib2>=2.3.0
