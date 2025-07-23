@@ -1,5 +1,5 @@
 name: Build Android APK
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 
 jobs:
   build:
@@ -202,20 +202,56 @@ jobs:
         
         # If build succeeded, show what was created
         echo "Build completed successfully!"
-        echo "Searching for APK files in all locations..."
-        find . -name "*.apk" -type f -ls 2>/dev/null || echo "No APK files found in current directory"
-        find $HOME/.buildozer -name "*.apk" -type f -ls 2>/dev/null || echo "No APK files found in buildozer cache"
+        echo "Comprehensive APK search..."
         
-        # Create bin directory and copy APK there for upload
+        # Search everywhere for APK files
+        echo "=== Searching in current directory and subdirectories ==="
+        find . -name "*.apk" -type f -exec ls -la {} \; 2>/dev/null || echo "No APK files found in current directory tree"
+        
+        echo "=== Searching in buildozer cache ==="
+        find $HOME/.buildozer -name "*.apk" -type f -exec ls -la {} \; 2>/dev/null || echo "No APK files found in buildozer cache"
+        
+        echo "=== Looking for dist directories ==="
+        find . -type d -name "dist" -exec ls -la {} \; 2>/dev/null || echo "No dist directories found"
+        
+        echo "=== Looking for dists directories ==="  
+        find . -type d -name "dists" -exec ls -la {} \; 2>/dev/null || echo "No dists directories found"
+        
+        echo "=== Directory structure of buildozer output ==="
+        ls -la .buildozer/android/platform/build-*/dists/ 2>/dev/null || echo "No dists directory structure found"
+        
+        # Create bin directory and copy any APK found anywhere
         mkdir -p bin/
+        
+        # Try multiple search methods to find APK
+        APK_FILE=""
+        
+        # Method 1: Search in current directory tree
         APK_FILE=$(find . -name "*.apk" -type f | head -1)
+        
+        # Method 2: Search in buildozer cache if not found
+        if [ -z "$APK_FILE" ]; then
+          APK_FILE=$(find $HOME/.buildozer -name "*.apk" -type f | head -1)
+        fi
+        
+        # Method 3: Look specifically in common buildozer locations
+        if [ -z "$APK_FILE" ]; then
+          for pattern in ".buildozer/android/platform/build-*/dists/testapp/dist" ".buildozer/android/platform/build-*/dists/testapp" ".buildozer/android/app"; do
+            APK_FILE=$(find $pattern -name "*.apk" -type f 2>/dev/null | head -1)
+            if [ -n "$APK_FILE" ]; then
+              break
+            fi
+          done
+        fi
+        
         if [ -n "$APK_FILE" ]; then
-          echo "Found APK: $APK_FILE"
-          cp "$APK_FILE" bin/
-          echo "Copied APK to bin/ for upload"
+          echo "✅ Found APK: $APK_FILE"
+          cp "$APK_FILE" bin/testapp-debug.apk
+          echo "✅ Copied APK to bin/testapp-debug.apk for upload"
           ls -la bin/
         else
-          echo "No APK file found to copy"
+          echo "❌ No APK file found anywhere!"
+          echo "This might indicate the build actually failed despite the success message"
         fi
         
     - name: Upload APK
@@ -223,7 +259,5 @@ jobs:
       if: success()
       with:
         name: android-apk-testapp
-        path: |
-          Android/bin/*.apk
-          Android/.buildozer/android/platform/build-*/dists/testapp/dist/*.apk
-          Android/.buildozer/android/platform/build-*/dists/testapp/*.apk
+        path: Android/bin/testapp-debug.apk
+        if-no-files-found: warn
