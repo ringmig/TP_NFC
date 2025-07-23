@@ -1,5 +1,4 @@
-name: Build Android APK
-
+name: Build Android APK (Docker)
 on:
   push:
     branches:
@@ -7,262 +6,100 @@ on:
   pull_request:
     branches:
       - master
-  workflow_dispatch: # Allows manual triggering
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    
     steps:
     - uses: actions/checkout@v4
-
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.8'
-
-    - name: Set up JDK 11
-      uses: actions/setup-java@v4
-      with:
-        java-version: '11'
-        distribution: 'temurin'
-
-    - name: Install system dependencies
+    
+    - name: Prepare buildozer.spec for Docker build
+      working-directory: Android
       run: |
-        echo "Installing system dependencies..."
-        sudo apt-get update
-        sudo apt-get install -y build-essential git python3-pip unzip zlib1g-dev libncurses-dev libffi-dev libssl-dev autoconf libtool libtool-bin pkg-config ccache cmake automake m4 libltdl-dev gettext
-        sudo ldconfig
-        autoconf --version | head -1
-        automake --version | head -1
-        libtool --version | head -1
-        echo "ACLOCAL_PATH=/usr/share/aclocal" >> $GITHUB_ENV # Export globally
-
-    - name: Install Python packages
-      run: |
-        echo "Installing Python packages..."
-        pip install --upgrade pip
-        pip install buildozer==1.5.0 cython==0.29.33 colorama
-
-    - name: Setup Android SDK, NDK and Accept Licenses
-      # This step will fully set up the Android SDK and NDK independently
-      # of buildozer's internal mechanisms, ensuring all licenses are accepted.
-      run: |
-        echo "Setting up Android SDK and NDK..."
-
-        # Define ANDROID_HOME and propagate globally
-        export ANDROID_HOME="$HOME/.buildozer/android/platform/android-sdk"
-        echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
-        echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV # Also set SDK_ROOT for compatibility
-
-        # Create SDK directory structure
-        echo "Creating SDK directory structure: $ANDROID_HOME"
-        mkdir -p "$ANDROID_HOME/cmdline-tools"
-
-        # Download and unzip latest command-line tools
-        # Using a more recent version that should have consistent structure
-        CMD_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
-        echo "Downloading Android command-line tools from $CMD_TOOLS_URL"
-        wget -q "$CMD_TOOLS_URL" -O /tmp/commandlinetools.zip
+        echo "Preparing buildozer.spec for Docker environment..."
         
-        # First, let's see what's actually in the zip file
-        echo "Contents of commandlinetools.zip:"
-        unzip -l /tmp/commandlinetools.zip | head -20
-        
-        # Extract to temporary location
-        unzip -q /tmp/commandlinetools.zip -d /tmp/cmdtools_extract/
-        
-        # Check what was actually extracted
-        echo "Checking extracted contents in /tmp/cmdtools_extract/:"
-        ls -la /tmp/cmdtools_extract/
-        
-        # Find the actual cmdline-tools directory
-        CMDTOOLS_DIR=$(find /tmp/cmdtools_extract -name "cmdline-tools" -type d | head -1)
-        if [ -z "$CMDTOOLS_DIR" ]; then
-          # If no cmdline-tools directory, look for any directory with bin/sdkmanager
-          CMDTOOLS_DIR=$(find /tmp/cmdtools_extract -name "sdkmanager" -type f | head -1 | xargs dirname | xargs dirname)
-        fi
-        
-        if [ -n "$CMDTOOLS_DIR" ] && [ -d "$CMDTOOLS_DIR" ]; then
-          echo "Found command-line tools at: $CMDTOOLS_DIR"
-          mv "$CMDTOOLS_DIR" "$ANDROID_HOME/cmdline-tools/latest"
-        else
-          echo "ERROR: Could not locate command-line tools in extracted files"
-          echo "Directory structure:"
-          find /tmp/cmdtools_extract -type f -name "*" | head -20
-          exit 1
-        fi
-        
-        rm /tmp/commandlinetools.zip
-        rm -rf /tmp/cmdtools_extract
-        echo "Android command-line tools installed to $ANDROID_HOME/cmdline-tools/latest"
-
-        # Add SDK tools to PATH for sdkmanager and other tools
-        export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$PATH"
-        echo "PATH=$PATH" >> $GITHUB_ENV # Update PATH globally
-
-        # Accept all Android SDK licenses
-        # This is crucial and must be done for all components
-        echo "Accepting Android SDK licenses..."
-        yes | sdkmanager --licenses || echo "License acceptance command completed (may show errors if no licenses to accept)."
-
-        # Define required versions based on buildozer.spec and common practice
-        REQUIRED_API_LEVEL="30"
-        REQUIRED_BUILD_TOOLS_VERSION="30.0.3"
-        REQUIRED_NDK_VERSION="25.1.8937393" # Full NDK version number
-
-        echo "Installing specific Android SDK components:"
-        echo "  - platforms;android-$REQUIRED_API_LEVEL"
-        echo "  - platforms;android-21 (min API)"
-        echo "  - build-tools;$REQUIRED_BUILD_TOOLS_VERSION"
-        echo "  - platform-tools"
-        echo "  - ndk;${REQUIRED_NDK_VERSION}"
-        echo "  - cmake;3.10.2.4988404"
-
-        # First, let's see what NDK packages are available
-        echo "Available NDK packages:"
-        sdkmanager --list | grep "ndk" | head -10 || echo "Could not list NDK packages"
-
-        sdkmanager \
-          "platforms;android-$REQUIRED_API_LEVEL" \
-          "platforms;android-21" \
-          "build-tools;$REQUIRED_BUILD_TOOLS_VERSION" \
-          "platform-tools" \
-          "ndk;${REQUIRED_NDK_VERSION}" \
-          "cmake;3.10.2.4988404" || {
-            echo "ERROR: Failed to install some SDK components. Trying without NDK..."
-            # Try without NDK first, then install NDK separately
-            sdkmanager \
-              "platforms;android-$REQUIRED_API_LEVEL" \
-              "platforms;android-21" \
-              "build-tools;$REQUIRED_BUILD_TOOLS_VERSION" \
-              "platform-tools" \
-              "cmake;3.10.2.4988404" || {
-                echo "ERROR: Failed to install basic SDK components."
-                exit 1
-              }
-            
-            # Try alternative NDK versions
-            echo "Trying alternative NDK versions..."
-            sdkmanager "ndk-bundle" || sdkmanager "ndk;21.4.7075529" || echo "Could not install any NDK version"
-          }
-        echo "All required SDK components installed."
-
-        # Find the actual NDK path after installation and set ANDROID_NDK_HOME globally
-        echo "Looking for installed NDK..."
-        ls -la "$ANDROID_HOME/" | grep ndk || echo "No ndk directory found"
-        
-        # Look for NDK in multiple possible locations
-        NDK_PATH=""
-        if [ -d "$ANDROID_HOME/ndk" ]; then
-          NDK_PATH=$(find "$ANDROID_HOME/ndk" -maxdepth 1 -type d | grep -v "^$ANDROID_HOME/ndk$" | head -1)
-        fi
-        
-        # Fallback to ndk-bundle if no versioned NDK found
-        if [ -z "$NDK_PATH" ] && [ -d "$ANDROID_HOME/ndk-bundle" ]; then
-          NDK_PATH="$ANDROID_HOME/ndk-bundle"
-        fi
-        
-        # Another fallback - look in buildozer's expected location
-        if [ -z "$NDK_PATH" ]; then
-          NDK_PATH=$(find $HOME/.buildozer/android/platform -name "android-ndk-r*" -type d | head -1)
-        fi
-
-        if [ -n "$NDK_PATH" ] && [ -d "$NDK_PATH" ]; then
-          export ANDROID_NDK_HOME="$NDK_PATH"
-          echo "Found NDK at: $NDK_PATH"
-        else
-          echo "WARNING: NDK path not found after installation. Setting default path."
-          # Set a default path - buildozer will download its own NDK if needed
-          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${REQUIRED_NDK_VERSION}"
-          echo "Set default NDK path: $ANDROID_NDK_HOME"
-        fi
-        echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME" >> $GITHUB_ENV
-
-        echo "Android SDK and NDK setup complete."
-
-    - name: Build APK
-      working-directory: Android # Ensure this is the correct directory containing buildozer.spec
-      run: |
-        echo "Starting APK build process..."
-
-        # Export environment for libtool (already set globally, but good to re-confirm)
-        export ACLOCAL_PATH="/usr/share/aclocal"
-        export ACLOCAL="aclocal -I /usr/share/aclocal"
-
-        # Update buildozer.spec to ensure it aligns with installed SDK/NDK versions
-        echo "Updating buildozer.spec with consistent API/NDK versions..."
+        # Ensure correct settings for Docker buildozer
         sed -i 's/^android\.api = .*/android.api = 30/' buildozer.spec
-        sed -i 's/^android\.ndk = .*/android.ndk = 25b/' buildozer.spec
-        sed -i 's/^android\.minapi = .*/android.minapi = 21/' buildozer.spec # Changed to 21 for consistency with SDK install
+        sed -i 's/^android\.ndk = .*/android.ndk = 25b/' buildozer.spec  
+        sed -i 's/^android\.minapi = .*/android.minapi = 21/' buildozer.spec
         sed -i 's/^android\.sdk = .*/android.sdk = 30/' buildozer.spec
         sed -i 's/^android\.build_tools = .*/android.build_tools = 30.0.3/' buildozer.spec
-        sed -i 's/^android\.archs = .*/android.archs = arm64-v8a,armeabi-v7a/' buildozer.spec # Ensure both archs are specified
-
-        # Ensure androidx is enabled if needed for modern Android versions
-        # This line is important for many modern Kivy/Android projects
+        sed -i 's/^android\.archs = .*/android.archs = armeabi-v7a/' buildozer.spec
+        
+        # Use stable Kivy version
+        sed -i 's/^requirements = .*/requirements = python3,kivy==2.1.0/' buildozer.spec
+        
+        # Enable AndroidX for modern Android builds
         if ! grep -q "android.enable_androidx" buildozer.spec; then
-          echo "android.enable_androidx = 1" >> buildozer.spec
+          echo "android.enable_androidx = True" >> buildozer.spec
         else
-          sed -i 's/^android\.enable_androidx = .*/android.enable_androidx = 1/' buildozer.spec
+          sed -i 's/^android\.enable_androidx = .*/android.enable_androidx = True/' buildozer.spec
         fi
-
-        echo "Final buildozer configuration:"
-        grep -E "android\.(api|sdk|ndk|minapi|archs|build_tools|enable_androidx)" buildozer.spec
-
-        echo "Environment variables during build:"
-        env | grep "ANDROID\|JAVA_HOME\|ACLOCAL"
-
-        # Clean buildozer cache to ensure a fresh build with the pre-installed SDK/NDK
-        echo "Cleaning buildozer cache..."
-        if [ -d ".buildozer/android/platform/python-for-android" ]; then
-          echo "Found existing python-for-android, cleaning..."
-          buildozer android clean
-        else
-          echo "No existing python-for-android found, skipping clean (first build)"
-          # Just remove any partial build directories if they exist
-          rm -rf .buildozer/android/platform/build-* || echo "No build directories to clean"
-          rm -rf .buildozer/android/platform/dists || echo "No dists directory to clean"
-        fi
-
-        # Force single architecture if needed, but your spec now includes both.
-        # If you only want one, uncomment and adjust:
-        # export P4A_ARCHS="armeabi-v7a"
-        # export ARCH="armeabi-v7a"
-
-        # Run the actual build
-        echo "Running buildozer android debug..."
-        buildozer android debug --verbose 2>&1 | tee build.log || {
-          echo "Buildozer build failed! See build.log for details."
-          tail -500 build.log # Show more lines for debugging
-          exit 1
-        }
-
-        echo "Buildozer build completed. Searching for APK..."
-
-        # Find the generated APK and copy it to the bin directory
-        # This is more robust as buildozer might place it in slightly different locations
-        APK_FILE=$(find . -name "*.apk" -type f | head -1) # Find the first .apk file
+        
+        echo "Final buildozer.spec configuration:"
+        grep -E "android\.(api|sdk|ndk|minapi|archs|build_tools|enable_androidx)|requirements" buildozer.spec
+    
+    - name: Build APK using Docker
+      working-directory: Android
+      run: |
+        echo "Building APK using official Kivy buildozer Docker image..."
+        echo "Current directory contents:"
+        ls -la
+        
+        # Create output directory
+        mkdir -p bin
+        
+        # Run buildozer in Docker with volume mounts
+        docker run --rm \
+          -v "$PWD":/home/user/hostcwd \
+          -v buildozer-cache:/home/user/.buildozer \
+          --workdir /home/user/hostcwd \
+          kivy/buildozer:latest \
+          android debug
+          
+        echo "Docker build completed. Searching for APK..."
+        
+        # Search for APK files in multiple locations
+        APK_FILE=""
+        
+        # Method 1: Look in current directory
+        APK_FILE=$(find . -name "*.apk" -type f | head -1)
+        
+        # Method 2: Look in .buildozer directory
         if [ -z "$APK_FILE" ]; then
-          # Fallback to buildozer's default dist directory if not found in current dir
-          APK_FILE=$(find .buildozer/android/platform/build-*/dists/testapp/ -name "*.apk" -type f | head -1)
+          APK_FILE=$(find .buildozer -name "*.apk" -type f 2>/dev/null | head -1)
         fi
-
+        
+        # Method 3: Look in bin directory (buildozer default output)
+        if [ -z "$APK_FILE" ]; then
+          APK_FILE=$(find bin -name "*.apk" -type f 2>/dev/null | head -1)
+        fi
+        
         if [ -n "$APK_FILE" ]; then
           echo "✅ Found APK: $APK_FILE"
-          mkdir -p bin/ # Ensure bin directory exists
-          cp "$APK_FILE" bin/testapp-debug.apk # Standardize the output name
-          echo "✅ Copied APK to Android/bin/testapp-debug.apk for upload"
+          # Copy to standardized location if not already there
+          if [ "$APK_FILE" != "bin/testapp-debug.apk" ]; then
+            cp "$APK_FILE" bin/testapp-debug.apk
+            echo "✅ Copied APK to bin/testapp-debug.apk"
+          fi
           ls -la bin/
+          echo "APK size: $(du -h bin/testapp-debug.apk)"
         else
-          echo "❌ ERROR: No APK file found after build process. Check build.log for errors."
-          exit 1 # Fail the workflow if no APK is found
+          echo "❌ No APK file found after Docker build"
+          echo "Docker build may have failed. Checking directory structure..."
+          echo "Current directory:"
+          find . -type f -name "*.apk" -o -name "*.log" | head -20
+          echo "Buildozer directory:"
+          find .buildozer -type f -name "*.apk" -o -name "*.log" 2>/dev/null | head -20 || echo "No .buildozer directory"
+          exit 1
         fi
-
+    
     - name: Upload APK
       uses: actions/upload-artifact@v4
-      if: success() # Only upload if the previous steps succeeded
+      if: success()
       with:
-        name: android-apk-testapp
-        path: Android/bin/testapp-debug.apk # Point to the standardized location
-        if-no-files-found: fail # Fail the workflow if the APK is still not found here
+        name: android-apk-testapp-docker
+        path: Android/bin/testapp-debug.apk
+        if-no-files-found: fail
