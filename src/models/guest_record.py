@@ -4,14 +4,14 @@
 Guest record model for attendance tracking.
 """
 
-from typing import Optional, Dict, Union
+from typing import Optional, Dict, Union, List
 from datetime import datetime
 
 
 class GuestRecord:
     """Model representing a guest record from the spreadsheet."""
     
-    def __init__(self, original_id: int, firstname: str, lastname: str):
+    def __init__(self, original_id: int, firstname: str, lastname: str, stations: List[str] = None):
         """
         Initialize guest record.
         
@@ -19,6 +19,7 @@ class GuestRecord:
             original_id: Unique identifier from the spreadsheet
             firstname: Guest's first name
             lastname: Guest's last name
+            stations: List of station names to initialize (if None, uses default stations)
         """
         self.original_id = original_id
         self.firstname = firstname
@@ -26,16 +27,24 @@ class GuestRecord:
         self.full_name = f"{firstname} {lastname}"
         
         # Station check-ins (station_name -> timestamp string or datetime)
-        self.check_ins: Dict[str, Optional[Union[str, datetime]]] = {
-            'reception': None,
-            'lio': None,
-            'juntos': None,
-            'experimental': None,
-            'unvrs': None
-        }
+        # Initialize with provided stations or default hardcoded ones
+        if stations:
+            self.check_ins: Dict[str, Optional[Union[str, datetime]]] = {
+                station.lower(): None for station in stations
+            }
+        else:
+            # Fallback to hardcoded stations for backward compatibility
+            self.check_ins: Dict[str, Optional[Union[str, datetime]]] = {
+                'reception': None,
+                'lio': None,
+                'juntos': None,
+                'experimental': None,
+                'unvrs': None
+            }
         
         # Associated NFC tag
         self.nfc_tag_uid: Optional[str] = None
+        self.row_number: Optional[int] = None  # For Google Sheets updates
         
     def check_in_at_station(self, station: str) -> bool:
         """
@@ -72,6 +81,22 @@ class GuestRecord:
     def has_tag(self) -> bool:
         """Check if guest has an assigned NFC tag."""
         return self.nfc_tag_uid is not None
+    
+    def ensure_station_exists(self, station: str) -> None:
+        """
+        Ensure a station exists in the check_ins dictionary.
+        This supports dynamic station addition from Google Sheets.
+        
+        Args:
+            station: Station name to add if not present
+        """
+        station = station.lower()
+        if station not in self.check_ins:
+            self.check_ins[station] = None
+    
+    def get_all_stations(self) -> List[str]:
+        """Get list of all available stations for this guest."""
+        return list(self.check_ins.keys())
         
     def __str__(self) -> str:
         """String representation of the guest."""

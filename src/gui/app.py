@@ -89,6 +89,13 @@ class NFCApp(ctk.CTk):
         self.is_displaying_tag_info = False
         self.tag_info_data = None
 
+        # Settings auto-close timer
+        self._settings_timer = None
+
+        # Station caching to reduce API calls
+        self._gui_cached_stations = None
+        self._station_cache_time = 0
+
         # Thread pool management
         self.thread_pool = ThreadPoolExecutor(max_workers=3)
         self._shutdown_event = threading.Event()
@@ -117,6 +124,9 @@ class NFCApp(ctk.CTk):
 
         # Load initial data
         self.after(100, lambda: self.refresh_guest_data(user_initiated=False))
+        
+        # Also refresh stations after a short delay to catch any initially failed dynamic station loading
+        self.after(1000, self._delayed_station_refresh)
 
         # Set up sync completion callback to update UI when background syncs complete
         self.tag_manager.set_sync_completion_callback(self.on_sync_complete)
@@ -597,7 +607,20 @@ class NFCApp(ctk.CTk):
 
         # Create station buttons with enhanced styling
         self.station_buttons = {}
-        for i, station in enumerate(self.config['stations']):
+        
+        # Get dynamic stations from Google Sheets (or fallback to config)
+        available_stations = self.config['stations']  # Default
+        
+        self.logger.info("Fetching stations...")
+        
+        # Use cached stations to avoid repeated API calls
+        try:
+            available_stations = self._get_stations_cached()
+        except Exception as e:
+            self.logger.warning(f"Could not get stations: {e}")
+            available_stations = self.config['stations']
+        
+        for i, station in enumerate(available_stations):
             btn = ctk.CTkButton(
                 buttons_container,
                 text=station,
@@ -613,6 +636,9 @@ class NFCApp(ctk.CTk):
 
         # Highlight current station
         self.update_station_buttons()
+        
+        # Store the buttons container for dynamic updates
+        self.station_buttons_container = buttons_container
 
     def create_status_bar(self):
         """Create status bar."""
@@ -715,7 +741,15 @@ class NFCApp(ctk.CTk):
         scrollbar.pack(side="right", fill="y")
 
         # Overview mode: show all stations
-        columns = ("id", "first", "last") + tuple(station.lower() for station in self.config['stations'])
+        # Get dynamic stations for table columns
+        # Use cached stations to avoid repeated API calls
+        try:
+            available_stations = self._get_stations_cached()
+        except Exception as e:
+            self.logger.warning(f"Could not get stations for table: {e}")
+            available_stations = self.config['stations']
+        
+        columns = ("id", "first", "last") + tuple(station.lower() for station in available_stations)
 
         # Treeview with flexible height
         self.guest_tree = ttk.Treeview(
@@ -737,7 +771,7 @@ class NFCApp(ctk.CTk):
         self.guest_tree.column("last", width=150, minwidth=100, anchor="w")
 
         # Set headers and widths for all stations with responsive sizing and padding
-        for i, station in enumerate(self.config['stations']):
+        for i, station in enumerate(available_stations):
             self.guest_tree.heading(station.lower(), text=station, anchor="center")
             self.guest_tree.column(station.lower(), width=120, minwidth=80, anchor="center")
 
@@ -1075,6 +1109,9 @@ class NFCApp(ctk.CTk):
             
         if self.settings_visible:
             self.settings_visible = False
+            if self._settings_timer:
+                self.after_cancel(self._settings_timer)
+                self._settings_timer = None
             # Clear search field when closing settings
             self.clear_search()
             # Reset erase confirmation state when leaving settings
@@ -1090,6 +1127,7 @@ class NFCApp(ctk.CTk):
                 self._update_status_with_correct_type()
         else:
             self.settings_visible = True
+            self._settings_timer = self.after(15000, self._auto_close_settings)
             # Don't stop scanning when entering settings
             # Show appropriate status in settings - only for check-in modes
             if self.is_checkpoint_mode or (not self.is_registration_mode):
@@ -1298,13 +1336,28 @@ class NFCApp(ctk.CTk):
         # Mark as background operation
         self._active_operations += 1
 
+        # Check global NFC lock before reading (race condition protection)
+        if self._nfc_operation_lock or not self.is_scanning:
+            self.logger.debug("Rewrite scan aborted - NFC operation lock active before tag read")
+            self._active_operations -= 1
+            return
+
         tag = self.nfc_service.read_tag(timeout=3)
 
         if not tag:
             self._active_operations -= 1
             self.after(100, self._rewrite_scan_loop)
             return
+        
+        # CRITICAL: Check NFC lock AGAIN after tag read to prevent race conditions
+        if self._nfc_operation_lock or not self.is_scanning:
+            self.logger.debug("Rewrite scan aborted - NFC operation started during tag read")
+            self._active_operations -= 1
+            return
 
+        # Log successful tag detection
+        self.logger.info(f"Tag detected for rewrite: {tag.uid}")
+        
         # Tag detected - check if guest ID field is filled
         guest_id = self.rewrite_id_entry.get().strip() if hasattr(self, 'rewrite_id_entry') else ""
 
@@ -1358,13 +1411,28 @@ class NFCApp(ctk.CTk):
         # Mark as background operation (can be interrupted)
         self._active_operations += 1
 
+        # Check global NFC lock before reading (race condition protection)
+        if self._nfc_operation_lock or not self.is_scanning:
+            self.logger.debug("Registration scan aborted - NFC operation lock active before tag read")
+            self._active_operations -= 1
+            return
+
         tag = self.nfc_service.read_tag(timeout=3)
 
         if not tag:
             self._active_operations -= 1
             self.after(100, self._registration_scan_loop)
             return
+        
+        # CRITICAL: Check NFC lock AGAIN after tag read to prevent race conditions
+        if self._nfc_operation_lock or not self.is_scanning:
+            self.logger.debug("Registration scan aborted - NFC operation started during tag read")
+            self._active_operations -= 1
+            return
 
+        # Log successful tag detection
+        self.logger.info(f"Tag detected: {tag.uid}")
+        
         # Check if tag is registered
         if tag.uid not in self.tag_manager.tag_registry:
             self._active_operations -= 1
@@ -1746,9 +1814,9 @@ class NFCApp(ctk.CTk):
             self._scanning_thread_active = True
             self.submit_background_task(self._scan_for_checkin)
         
-        # Always schedule next check to keep scanning alive
+        # Always schedule next check to keep scanning alive (reduced frequency for better lock responsiveness)
         if self.is_scanning:
-            self.after(100, self._checkpoint_scan_loop)
+            self.after(200, self._checkpoint_scan_loop)
 
     def _scan_for_checkin(self):
         """Scan for check-in (thread function)."""
@@ -1757,7 +1825,8 @@ class NFCApp(ctk.CTk):
             self._active_operations += 1
 
             # Check global NFC lock again before reading (race condition protection)
-            if self._nfc_operation_lock:
+            if self._nfc_operation_lock or not self.is_scanning:
+                self.logger.debug("Background scan aborted - NFC operation lock active before tag read")
                 self._active_operations -= 1
                 self._scanning_thread_active = False
                 return
@@ -1770,7 +1839,18 @@ class NFCApp(ctk.CTk):
                 # Continue scanning after short delay
                 self.after(100, self._restart_scanning_after_timeout)
                 return
+            
+            # CRITICAL: Check NFC lock AGAIN after tag read to prevent race conditions
+            # This prevents check-ins when Tag Info or other operations started during the read
+            if self._nfc_operation_lock or not self.is_scanning:
+                self.logger.debug("Background scan aborted - NFC operation started during tag read")
+                self._active_operations -= 1
+                self._scanning_thread_active = False
+                return
 
+            # Log successful tag detection
+            self.logger.info(f"Tag detected for check-in: {tag.uid}")
+            
             # Check if tag is registered
             if tag.uid not in self.tag_manager.tag_registry:
                 self._active_operations -= 1
@@ -1925,13 +2005,13 @@ class NFCApp(ctk.CTk):
         self._active_operations += 1
         
         if result:
+            self.logger.info(f"Check-in successful: {result['guest_name']} at {self.current_station}")
             self.safe_update_widget(
                 'checkpoint_status',
                 lambda w, text, tc: w.configure(text=text, text_color=tc),
                 f"✓ {result['guest_name']} checked in at {result['timestamp']}",
                 "#4CAF50"
             )
-            self.update_status("Tag detected", "success")
 
             # Delay refresh to ensure status is visible and sync has time to complete
             self.after(3000, lambda: self._checkin_processing_complete(True))
@@ -2261,6 +2341,7 @@ class NFCApp(ctk.CTk):
             self._nfc_operation_lock = False
 
             if tag:
+                self.logger.info(f"Tag detected for info: {tag.uid}")
                 info = self.tag_manager.get_tag_info(tag.uid)
                 self.after(0, self._tag_info_complete, info)
             else:
@@ -2314,6 +2395,52 @@ class NFCApp(ctk.CTk):
                 self.update_status("Guest data not found", "warning")
         else:
             self.update_status("Tag not registered", "warning")
+
+    def _get_stations_cached(self) -> List[str]:
+        """Get stations with GUI-level caching to minimize API calls."""
+        import time
+        current_time = time.time()
+        cache_duration = 30  # Cache for 30 seconds
+        
+        # Use cached data if recent
+        if (self._gui_cached_stations is not None and 
+            current_time - self._station_cache_time < cache_duration):
+            return self._gui_cached_stations
+        
+        # Get stations from service (which has its own caching)
+        try:
+            if hasattr(self, 'sheets_service') and self.sheets_service:
+                stations = self.sheets_service.get_available_stations()
+                self._gui_cached_stations = stations
+                self._station_cache_time = current_time
+                return stations
+        except Exception:
+            pass
+        
+        # Fallback to config stations
+        fallback = self.config.get('stations', ['Reception', 'Lio', 'Juntos', 'Experimental', 'Unvrs'])
+        self._gui_cached_stations = fallback
+        self._station_cache_time = current_time
+        return fallback
+
+    def _auto_close_settings(self):
+        """Auto-close settings after 15 seconds."""
+        if self.settings_visible:
+            self.settings_visible = False
+            # Clear search field when closing settings
+            self.clear_search()
+            # Reset erase confirmation state when leaving settings
+            self._reset_erase_confirmation()
+            # Clear any stale settings references
+            if hasattr(self, '_came_from_settings'):
+                delattr(self, '_came_from_settings')
+            self.update_mode_content()
+            # Return to appropriate status
+            if self.is_rewrite_mode:
+                self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
+            else:
+                self._update_status_with_correct_type()
+        self._settings_timer = None
 
     def show_logs(self):
         """Show log viewer dialog."""
@@ -2711,6 +2838,102 @@ class NFCApp(ctk.CTk):
                     border_color="#3b82f6",
                     border_width=2
                 )
+    
+    def _check_and_refresh_stations(self):
+        """Check if new stations were added to Google Sheets and refresh UI."""
+        try:
+            if not hasattr(self, 'sheets_service') or not self.sheets_service or not self.sheets_service.service:
+                return
+                
+            # Get current stations (using cache)
+            try:
+                current_stations = self._get_stations_cached()
+                if not current_stations:
+                    return
+            except Exception:
+                return
+                
+            # Check if stations have changed
+            current_buttons = set(self.station_buttons.keys())
+            new_stations = set(current_stations)
+            
+            if current_buttons != new_stations:
+                self.logger.info(f"Station change detected! Current: {current_buttons}, New: {new_stations}")
+                
+                # Clear station cache to force re-detection
+                self.sheets_service.clear_station_cache()
+                
+                # Recreate station buttons
+                self._recreate_station_buttons(current_stations)
+                
+                # Note: Table recreation disabled due to memory corruption
+                # self._recreate_guest_table()
+                
+                # Refresh data
+                self._update_guest_table_silent(self.guests_data)
+                
+                self.logger.info("Station UI refreshed with new stations")
+                
+        except Exception as e:
+            self.logger.error(f"Error checking for new stations: {e}")
+    
+    def _recreate_station_buttons(self, stations):
+        """Recreate station buttons with new stations."""
+        # Clear existing buttons
+        for btn in self.station_buttons.values():
+            btn.destroy()
+        self.station_buttons.clear()
+        
+        # Create new buttons
+        for i, station in enumerate(stations):
+            btn = ctk.CTkButton(
+                self.station_buttons_container,
+                text=station,
+                command=lambda s=station: self.on_station_button_click(s),
+                width=110,
+                height=50,
+                corner_radius=12,
+                font=CTkFont(size=15, weight="bold"),
+                border_width=2
+            )
+            btn.pack(side="left", padx=3)
+            self.station_buttons[station] = btn
+            
+        # Update highlighting
+        self.update_station_buttons()
+        
+    def _recreate_guest_table(self):
+        """Recreate the guest table with new columns - DISABLED due to memory corruption issues."""
+        # This method causes memory corruption when destroying/recreating widgets
+        # Instead, we'll just refresh the data without recreating the widget
+        self.logger.warning("Guest table recreation disabled - restart app to see new columns")
+        return
+    
+    def _delayed_station_refresh(self):
+        """Force refresh of dynamic stations after UI initialization."""
+        try:
+            if hasattr(self, 'sheets_service') and self.sheets_service and self.sheets_service.service:
+                # Clear both service cache and GUI cache to force fresh detection
+                self.sheets_service.clear_station_cache()
+                self._gui_cached_stations = None
+                
+                # Get fresh dynamic stations
+                dynamic_stations = self._get_stations_cached()
+                
+                if dynamic_stations:
+                    # Check if stations have changed
+                    current_buttons = set(self.station_buttons.keys())
+                    new_stations = set(dynamic_stations)
+                    
+                    if current_buttons != new_stations:
+                        self.logger.info(f"New stations detected: {list(new_stations - current_buttons)}")
+                        self._recreate_station_buttons(dynamic_stations)
+                        # Note: Table recreation disabled due to memory corruption
+                        # self._recreate_guest_table()
+                        if hasattr(self, 'guests_data'):
+                            self._update_guest_table_silent(self.guests_data)
+        except Exception as e:
+            self.logger.warning(f"Error refreshing stations: {e}")
 
     def toggle_guest_list(self):
         """Toggle guest list visibility."""
@@ -2821,11 +3044,28 @@ class NFCApp(ctk.CTk):
                 guest.lastname
             ]
 
+            # Get dynamic stations
+            # Use cached stations for table population
+            try:
+                available_stations = self._get_stations_cached()
+            except:
+                available_stations = self.config['stations']
+            
             # Add check-in status for each station
-            for station in self.config['stations']:
+            for station in available_stations:
+                station_key = station.lower()
+                
+                # Ensure the guest has this station in their check_ins dict
+                if not hasattr(guest, 'ensure_station_exists'):
+                    # For older guest objects without the method, add the station manually
+                    if station_key not in guest.check_ins:
+                        guest.check_ins[station_key] = None
+                else:
+                    guest.ensure_station_exists(station_key)
+                
                 # Google Sheets data takes priority (for manual edits compatibility)
-                sheets_time = guest.get_check_in_time(station.lower())
-                local_time = local_check_ins.get(guest.original_id, {}).get(station.lower())
+                sheets_time = guest.get_check_in_time(station_key)
+                local_time = local_check_ins.get(guest.original_id, {}).get(station_key)
 
                 if sheets_time:
                     # Google Sheets has data - use it (no hourglass needed)
@@ -2852,6 +3092,9 @@ class NFCApp(ctk.CTk):
             self.sync_status_label.configure(text=f"⏳ {registry_stats['pending_syncs']} pending", text_color="#ff9800")
         else:
             self.sync_status_label.configure(text="✓ All synced", text_color="#4CAF50")
+            
+        # Check if we need to refresh station buttons
+        self._check_and_refresh_stations()
 
     def refresh_guest_data(self, user_initiated=True):
         """Refresh guest data from Google Sheets."""
@@ -2925,11 +3168,24 @@ class NFCApp(ctk.CTk):
                 guest.lastname
             ]
 
+            # Get dynamic stations
+            # Use cached stations for table population
+            try:
+                available_stations = self._get_stations_cached()
+            except:
+                available_stations = self.config['stations']
+            
             # Add check-in status for each station
-            for station in self.config['stations']:
+            for station in available_stations:
+                station_key = station.lower()
+                
+                # Ensure the guest has this station in their check_ins dict
+                if station_key not in guest.check_ins:
+                    guest.check_ins[station_key] = None
+                
                 # Google Sheets data takes priority (for manual edits compatibility)
-                sheets_time = guest.get_check_in_time(station.lower())
-                local_time = local_check_ins.get(guest.original_id, {}).get(station.lower())
+                sheets_time = guest.get_check_in_time(station_key)
+                local_time = local_check_ins.get(guest.original_id, {}).get(station_key)
 
                 if sheets_time:
                     # Google Sheets has data - use it (no hourglass needed)
@@ -3072,11 +3328,24 @@ class NFCApp(ctk.CTk):
                     guest.lastname
                 ]
 
+                # Get dynamic stations
+                # Use cached stations for table population
+                try:
+                    available_stations = self._get_stations_cached()
+                except:
+                    available_stations = self.config['stations']
+                
                 # Add check-in status for each station
-                for station in self.config['stations']:
+                for station in available_stations:
+                    station_key = station.lower()
+                    
+                    # Ensure the guest has this station in their check_ins dict
+                    if station_key not in guest.check_ins:
+                        guest.check_ins[station_key] = None
+                    
                     # Google Sheets data takes priority (for manual edits compatibility)
-                    sheets_time = guest.get_check_in_time(station.lower())
-                    local_time = local_check_ins.get(guest.original_id, {}).get(station.lower())
+                    sheets_time = guest.get_check_in_time(station_key)
+                    local_time = local_check_ins.get(guest.original_id, {}).get(station_key)
 
                     if sheets_time:
                         # Google Sheets has data - use it

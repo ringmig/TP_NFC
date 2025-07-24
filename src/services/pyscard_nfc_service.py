@@ -126,7 +126,7 @@ class PyscardNFCService:
                 
                 if sw1 == 0x90 and sw2 == 0x00:
                     uid = toHexString(response).replace(' ', '')
-                    self.logger.info(f"Tag detected with UID: {uid}")
+                    self.logger.debug(f"Tag detected with UID: {uid}")  # Reduced to debug level
                     
                     # Create NFCTag instance
                     tag = NFCTag(uid)
@@ -146,7 +146,7 @@ class PyscardNFCService:
                 else:
                     # Final attempt or different error type
                     if "timeout" in str(e).lower():
-                        self.logger.info("No tag detected within timeout period")
+                        self.logger.debug("No tag detected within timeout period")
                     else:
                         self.logger.error(f"Error reading NFC tag: {e}")
                     return None
