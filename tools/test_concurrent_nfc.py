@@ -22,7 +22,7 @@ def test_nfc_lock_behavior():
     operations_allowed = 0
     
     def try_checkpoint_scan():
-        nonlocal _nfc_operation_lock, operations_blocked, operations_allowed
+        nonlocal operations_blocked, operations_allowed
         if _nfc_operation_lock:
             print("✓ Checkpoint scan BLOCKED - NFC operation in progress")
             operations_blocked += 1
