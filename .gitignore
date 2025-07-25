@@ -63,3 +63,22 @@ htmlcov/
 Android/.buildozer/
 Android/bin/
 *.apk
+
+# PyInstaller / cx_Freeze build artifacts
+build/
+dist/
+*.spec
+
+# Security scan reports
+bandit-report.json
+safety-report.json
+pip-audit-report.json
+
+# mypy cache
+.mypy_cache/
+
+# pytest cache
+.pytest_cache/
+
+# CI artifacts and logs
+.github/ci_logs/

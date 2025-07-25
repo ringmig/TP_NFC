@@ -7,13 +7,17 @@ on:
     branches: [ main, master ]
 
 jobs:
-  # Basic linting and testing
+  # Basic linting and testing for Windows and macOS
   test:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        os: [windows-latest, macos-latest]
         python-version: ['3.9', '3.10']
+        exclude:
+          # Reduce CI time by testing fewer combinations
+          - os: macos-latest
+            python-version: '3.9'
 
     steps:
     - uses: actions/checkout@v4
@@ -23,19 +27,30 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
     
-    - name: Cache pip
+    - name: Cache pip (Windows)
+      if: matrix.os == 'windows-latest'
       uses: actions/cache@v4
       with:
-        path: ~/.cache/pip
+        path: ~\AppData\Local\pip\Cache
         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-
     
-    - name: Install system dependencies
-      if: matrix.os == 'ubuntu-latest'
+    - name: Cache pip (macOS)
+      if: matrix.os == 'macos-latest'
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Caches/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
       run: |
-        sudo apt-get update
-        sudo apt-get install -y libpcsclite-dev
+        # Install PCSC for NFC support
+        brew update
+        brew install pcsc-lite
     
     - name: Install dependencies
       run: |
@@ -62,9 +77,9 @@ jobs:
         name: codecov-umbrella
       continue-on-error: true
 
-  # Optional formatting check (won't fail the build)
+  # Optional formatting check (won't fail the build, run on Windows)
   format-check:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
     

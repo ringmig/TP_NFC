@@ -9,7 +9,7 @@ on:
 jobs:
   # Code Quality and Linting
   lint:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
     
@@ -21,7 +21,8 @@ jobs:
     - name: Cache pip dependencies
       uses: actions/cache@v4
       with:
-        path: ~/.cache/pip
+        path: |
+          ~\AppData\Local\pip\Cache
         key: ${{ runner.os }}-pip-lint-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-lint-
@@ -62,7 +63,7 @@ jobs:
 
   # Security Scanning
   security:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
     - uses: actions/checkout@v4
     
@@ -70,6 +71,16 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
+    
+    - name: Cache pip dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~\AppData\Local\pip\Cache
+        key: ${{ runner.os }}-pip-security-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-security-
+          ${{ runner.os }}-pip-
     
     - name: Install security tools
       run: |
@@ -96,13 +107,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest, macos-latest]
         python-version: ['3.9', '3.10', '3.11']
         exclude:
           # Exclude some combinations to save CI time
           - os: macos-latest
-            python-version: '3.9'
-          - os: windows-latest
             python-version: '3.9'
 
     steps:
@@ -125,17 +134,17 @@ jobs:
           ${{ runner.os }}-pip-${{ matrix.python-version }}-
           ${{ runner.os }}-pip-
     
-    - name: Install system dependencies (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libpcsclite-dev
-    
     - name: Install system dependencies (macOS)
       if: matrix.os == 'macos-latest'
       run: |
         brew update
         brew install pcsc-lite
+    
+    - name: Install system dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        # Windows should have PCSC built-in, but ensure it's available
+        echo "Windows PCSC should be available by default"
     
     - name: Install dependencies
       run: |
@@ -162,7 +171,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest, macos-latest]
         python-version: ['3.10']
 
     steps:
@@ -203,7 +212,7 @@ jobs:
   # Summary job
   ci-success:
     needs: [lint, security, test, build-test]
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     if: always()
     steps:
     - name: Check CI Status
