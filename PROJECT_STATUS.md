@@ -73,6 +73,13 @@
 - [x] **Log Viewer**: Built-in application log display
 - [x] **Tag Info Display**: Inline guest information from scanned tags
 - [x] **Smart Search**: Multi-word, order-independent guest filtering
+- [x] **Dynamic Station Detection**: Auto-detects new stations from Google Sheets headers
+- [x] **Editable Treeview**: Double-click to edit check-in values with immediate feedback
+- [x] **Visual Feedback System**: Hourglasses for pending syncs, green rows for complete guests
+- [x] **Real-time Internet Monitoring**: Automatic detection of connectivity loss/restoration
+- [x] **Fixed Summary Row**: Non-scrollable "checked in / total" counts always visible
+- [x] **Auto-Clear Guest ID**: 15-second timeout prevents accidental registrations
+- [x] **Offline Protection**: Blocks operations when internet unavailable
 
 ### User Experience Enhancements
 - [x] **Keyboard Shortcuts**: 

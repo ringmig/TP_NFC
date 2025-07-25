@@ -16,6 +16,7 @@ import os
 import platform
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+import requests
 
 # Configure CustomTkinter
 ctk.set_appearance_mode("dark")
@@ -26,10 +27,10 @@ class NFCApp(ctk.CTk):
     """Main application window."""
 
     # Status message constants
-    STATUS_READY_REGISTRATION = "Ready to register"
+    STATUS_READY_REGISTRATION = ""
     STATUS_READY_WAITING_FOR_CHECKIN = "Ready. Waiting on check-in..."
     STATUS_WAITING_FOR_CHECKIN = "Waiting on check-in..."
-    STATUS_READY_CHECKIN = "Ready"
+    STATUS_READY_CHECKIN = ""
     STATUS_CHECKIN_PAUSED = "Check-in Paused"
     STATUS_NFC_NOT_CONNECTED = "⚠️ NFC READER NOT CONNECTED"
     STATUS_NFC_CONNECTED = "✅ NFC reader connected"
@@ -38,6 +39,18 @@ class NFCApp(ctk.CTk):
     STATUS_PLEASE_ENTER_GUEST_ID = "Please enter a Guest ID"
     STATUS_INVALID_ID_FORMAT = "Invalid ID format"
     STATUS_TAG_ALREADY_REGISTERED = "⚠️ Tag already registered to {guest_name}"
+    
+    # Sync status label constants
+    SYNC_STATUS_CONNECTED = "◉"
+    SYNC_STATUS_EMPTY = "⚠️ Sheets Empty"
+    SYNC_STATUS_RATE_LIMITED = "⚠️ Rate Limited"
+    SYNC_STATUS_NO_INTERNET = "✗ No Internet"
+    SYNC_STATUS_OFFLINE = "✗ Google Service Offline"
+    SYNC_STATUS_ERROR = "✗ Sync Failed"
+    
+    # Internet connectivity test constants
+    TEST_INTERNET_URL = "http://www.google.com"
+    TEST_INTERNET_TIMEOUT = 4
     
 
     def __init__(self, config: dict, nfc_service, sheets_service, tag_manager, logger):
@@ -63,9 +76,7 @@ class NFCApp(ctk.CTk):
         self._scanning_thread_active = False  # Track active scanning thread
         self.erase_confirmation_state = False  # Track erase button confirmation state
 
-        # Sorting state - default to Last Name A-Z
-        self.current_sort_column = "last"
-        self.current_sort_reverse = False
+        # Sorting removed due to summary row
 
         # Track hovered item for styling
         self.hovered_item = None
@@ -127,6 +138,12 @@ class NFCApp(ctk.CTk):
         
         # Also refresh stations after a short delay to catch any initially failed dynamic station loading
         self.after(1000, self._delayed_station_refresh)
+        
+        # Start periodic connection status check
+        self.after(5000, self._periodic_status_check)
+        
+        # Start lightweight internet monitoring (after initial load)
+        self.after(10000, self._check_internet_periodically)
 
         # Set up sync completion callback to update UI when background syncs complete
         self.tag_manager.set_sync_completion_callback(self.on_sync_complete)
@@ -588,6 +605,15 @@ class NFCApp(ctk.CTk):
             hover_color="#5a5a5a"
         )
         self.settings_btn.pack(side="right", padx=20)
+
+        # Sync status label (to the left of settings button)
+        self.sync_status_label = ctk.CTkLabel(
+            header_frame,
+            text="",
+            font=self.fonts['body'],
+            text_color="#4CAF50"
+        )
+        self.sync_status_label.pack(side="right", padx=(0, 10))
         self.update_settings_button()
 
         # Station buttons centered
@@ -718,26 +744,22 @@ class NFCApp(ctk.CTk):
         )
         # Button will be shown/hidden in update_mode_content
 
-        # Sync status label (on same line as search)
-        self.sync_status_label = ctk.CTkLabel(
-            search_frame,
-            text="",
-            font=self.fonts['body'],
-            text_color="#4CAF50"
-        )
-        self.sync_status_label.pack(side="right", padx=(20, 0))
 
         # Guest list (using tkinter Treeview for table)
         self.create_guest_table()
 
     def create_guest_table(self):
         """Create the guest list table."""
-        # Frame for treeview
-        tree_frame = ctk.CTkFrame(self.list_frame)
+        # Frame for treeview (no border)
+        tree_frame = ctk.CTkFrame(self.list_frame, border_width=0)
         tree_frame.pack(fill="both", expand=True, padx=10, pady=(5, 10))
 
+        # Container for summary and main tree
+        table_container = ctk.CTkFrame(tree_frame, fg_color="transparent", border_width=0)
+        table_container.pack(fill="both", expand=True)
+
         # Scrollbar
-        scrollbar = ctk.CTkScrollbar(tree_frame)
+        scrollbar = ctk.CTkScrollbar(table_container)
         scrollbar.pack(side="right", fill="y")
 
         # Overview mode: show all stations
@@ -751,29 +773,40 @@ class NFCApp(ctk.CTk):
         
         columns = ("id", "first", "last") + tuple(station.lower() for station in available_stations)
 
-        # Treeview with flexible height
+        # Fixed summary treeview (non-scrollable)
+        self.summary_tree = ttk.Treeview(
+            table_container,
+            columns=columns,
+            show="headings",
+            height=1  # Only one row for summary
+        )
+        self.summary_tree.pack(fill="x", pady=(0, 1))
+
+        # Main guest treeview (scrollable)
         self.guest_tree = ttk.Treeview(
-            tree_frame,
+            table_container,
             columns=columns,
             show="headings",
             yscrollcommand=scrollbar.set
         )
         scrollbar.configure(command=self.guest_tree.yview)
+        self.guest_tree.pack(fill="both", expand=True)
 
-        # Configure column headers and widths
-        self.guest_tree.heading("id", text="Guest ID", anchor="w")
-        self.guest_tree.heading("first", text="First Name", anchor="w")
-        self.guest_tree.heading("last", text="Last Name", anchor="w")
+        # Configure column headers and widths for both trees
+        for tree in [self.summary_tree, self.guest_tree]:
+            tree.heading("id", text="Guest ID", anchor="w")
+            tree.heading("first", text="First Name", anchor="w")
+            tree.heading("last", text="Last Name", anchor="w")
 
-        # Set responsive column widths with padding for visual separation
-        self.guest_tree.column("id", width=80, minwidth=60, anchor="w")
-        self.guest_tree.column("first", width=150, minwidth=100, anchor="w")
-        self.guest_tree.column("last", width=150, minwidth=100, anchor="w")
+            # Set responsive column widths with padding for visual separation
+            tree.column("id", width=80, minwidth=60, anchor="w")
+            tree.column("first", width=150, minwidth=100, anchor="w")
+            tree.column("last", width=150, minwidth=100, anchor="w")
 
-        # Set headers and widths for all stations with responsive sizing and padding
-        for i, station in enumerate(available_stations):
-            self.guest_tree.heading(station.lower(), text=station, anchor="center")
-            self.guest_tree.column(station.lower(), width=120, minwidth=80, anchor="center")
+            # Set headers and widths for all stations with responsive sizing and padding
+            for i, station in enumerate(available_stations):
+                tree.heading(station.lower(), text=station, anchor="center")
+                tree.column(station.lower(), width=120, minwidth=80, anchor="center")
 
         # Style for treeview
         style = ttk.Style()
@@ -784,48 +817,133 @@ class NFCApp(ctk.CTk):
                        background="#212121",
                        foreground="white",
                        fieldbackground="#212121",
-                       borderwidth=1,
+                       borderwidth=0,
                        relief="flat",
                        rowheight=25,
                        font=("TkFixedFont", 12, "normal"))
 
         style.configure("Treeview.Heading",
-                       background="#323232",
+                       background="#2b2b2b",
                        foreground="white",
-                       borderwidth=1,
+                       borderwidth=0,
                        relief="flat",
                        font=("TkFixedFont", 13, "bold"))
 
-        # Map item states to colors - include hover (active) state
+        # Remove default border/padding layout
+        style.layout("Treeview", [('Treeview.treearea', {'sticky': 'nswe'})])
+
+        # Hide headers on summary tree (we only want the summary row)
+        self.summary_tree.configure(show="")
+
+        # Map item states to colors and remove focus border
         style.map('Treeview',
                   background=[('selected', '#4a4a4a'), ('active', '#ff9800')],
-                  foreground=[('selected', 'white'), ('active', 'black')])
+                  foreground=[('selected', 'white'), ('active', 'black')],
+                  bordercolor=[('focus', '#212121')],  # Set focus border to background color
+                  focusthickness=[('focus', 0)])  # Set focus thickness to 0
         
         # Force override for hover text color
         style.map('Treeview.Item',
                   foreground=[('active', 'black')])
 
-        # Bind selection
-        self.guest_tree.bind("<Double-Button-1>", self.on_guest_select)
+        # Bind selection and editing
+        self.guest_tree.bind("<Double-Button-1>", self.on_cell_double_click)
 
-        # Bind click for check-in button
+        # Bind click for check-in button and closing edit
         self.guest_tree.bind("<Button-1>", self.on_tree_click)
+        
+        # Track editing state
+        self.edit_entry = None
+        self.edit_item = None
+        self.edit_column = None
+        
+        # Track internet connection status
+        self._internet_connected = True
 
         # Bind mouse motion for cursor changes
         self.guest_tree.bind("<Motion>", self.on_tree_motion)
 
-        # Bind column headers for sorting
-        sortable_columns = ["id", "first", "last"]
-        for col in sortable_columns:
-            self.guest_tree.heading(col, command=lambda c=col: self.sort_treeview(c))
-
+        # Column headers without sorting functionality
         self.guest_tree.pack(fill="both", expand=True)
 
-        # Sorting state
-        self.sort_reverse = {}
-
-        # Configure hover tag for check-in buttons
+        # Configure tags for styling
         self.guest_tree.tag_configure("checkin_hover", background="#ff9800", foreground="black")
+        self.guest_tree.tag_configure("complete", background="#4CAF50", foreground="black")  # Green for fully checked-in
+        self.guest_tree.tag_configure("odd", background="#2b2b2b")  # Current color
+        self.guest_tree.tag_configure("even", background="#353535")  # Slightly brighter
+
+    def _is_guest_fully_checked_in(self, guest, available_stations):
+        """Check if guest is checked in at all available stations."""
+        for station in available_stations:
+            station_key = station.lower()
+            
+            # Check both local and sheets data
+            local_time = None
+            sheets_time = None
+            
+            # Get local check-ins
+            if hasattr(self, 'tag_manager'):
+                local_check_ins = self.tag_manager.get_all_local_check_ins()
+                guest_local_data = local_check_ins.get(guest.original_id, {})
+                local_time = guest_local_data.get(station_key)
+            
+            # Get Google Sheets data
+            if hasattr(guest, 'get_check_in_time'):
+                sheets_time = guest.get_check_in_time(station_key)
+            
+            # If neither local nor sheets has data for this station, not complete
+            if not sheets_time and not local_time:
+                return False
+        
+        return True
+
+    def _update_row_styling(self, item, guest_id):
+        """Update row styling after edit to reflect complete status."""
+        try:
+            # Get current available stations
+            available_stations = self._get_stations_cached()
+            
+            # Get the current values from the tree item
+            item_values = self.guest_tree.item(item)['values']
+            
+            # Check if all station columns have check-ins (including local queue)
+            fully_checked_in = True
+            
+            # Get local check-ins for this guest
+            local_checkins = self.tag_manager.get_all_local_check_ins().get(int(guest_id), {})
+            
+            # Station columns start at index 3 (after id, first, last)
+            for i, station in enumerate(available_stations):
+                col_index = i + 3
+                station_lower = station.lower()
+                
+                # Check tree value first
+                tree_has_checkin = False
+                if col_index < len(item_values):
+                    value = item_values[col_index]
+                    # A check-in exists if it starts with ✓ or has actual timestamp data
+                    tree_has_checkin = value.startswith("✓") or (value not in ["-", "", "Check-in"])
+                
+                # Check local queue
+                local_has_checkin = station_lower in local_checkins
+                
+                # If neither tree nor local has check-in, not fully checked in
+                if not tree_has_checkin and not local_has_checkin:
+                    fully_checked_in = False
+                    break
+            
+            # Apply appropriate styling
+            if fully_checked_in:
+                self.guest_tree.item(item, tags=["complete"])
+            else:
+                # Determine alternate row color
+                row_index = self.guest_tree.index(item)
+                if row_index % 2 == 0:
+                    self.guest_tree.item(item, tags=["even"])
+                else:
+                    self.guest_tree.item(item, tags=["odd"])
+        except Exception as e:
+            self.logger.debug(f"Error updating row styling: {e}")
 
     def create_tag_info_content(self):
         """Create inline tag info display."""
@@ -1063,40 +1181,6 @@ class NFCApp(ctk.CTk):
         )
         self.dev_mode_btn.pack(pady=10)
 
-    def sort_treeview(self, col):
-        """Sort treeview by column."""
-        # Determine sort direction
-        if self.current_sort_column == col:
-            # Same column clicked - toggle direction
-            self.current_sort_reverse = not self.current_sort_reverse
-        else:
-            # New column clicked - start with ascending
-            self.current_sort_column = col
-            self.current_sort_reverse = False
-
-        # Apply the sort
-        self._apply_current_sort()
-
-        # Update old sort_reverse dict for compatibility
-        self.sort_reverse[col] = self.current_sort_reverse
-
-    def _apply_current_sort(self):
-        """Apply the current sort column and direction to the treeview."""
-        if not self.current_sort_column:
-            return
-
-        # Get all items
-        items = [(self.guest_tree.set(k, self.current_sort_column), k) for k in self.guest_tree.get_children('')]
-
-        # Check if we need numeric sort for ID column
-        if self.current_sort_column == "id":
-            items.sort(key=lambda x: int(x[0]) if x[0].isdigit() else 0, reverse=self.current_sort_reverse)
-        else:
-            items.sort(reverse=self.current_sort_reverse)
-
-        # Rearrange items
-        for index, (val, k) in enumerate(items):
-            self.guest_tree.move(k, '', index)
 
     def toggle_settings(self):
         """Toggle settings panel visibility."""
@@ -1206,8 +1290,8 @@ class NFCApp(ctk.CTk):
 
             # Show manual check-in button for all stations (in search bar area)
             if not self.is_rewrite_mode:
-                # Manual check-in button positioning after sync label
-                self.manual_checkin_btn.pack(side="right", padx=(10, 0), before=self.sync_status_label)
+                # Manual check-in button positioning
+                self.manual_checkin_btn.pack(side="right", padx=(10, 0))
                 
                 # Update button text based on current manual check-in state
                 if self.checkin_buttons_visible:
@@ -3036,6 +3120,15 @@ class NFCApp(ctk.CTk):
         for item in self.guest_tree.get_children():
             self.guest_tree.delete(item)
 
+        # Get dynamic stations for summary row
+        try:
+            available_stations = self._get_stations_cached()
+        except:
+            available_stations = self.config['stations']
+
+        # Add summary row showing checked-in counts per station
+        self._add_summary_row(guests, available_stations, local_check_ins)
+
         # Add guests
         for i, guest in enumerate(guests):
             values = [
@@ -3078,34 +3171,270 @@ class NFCApp(ctk.CTk):
                 else:
                     values.append("-")
 
-            item = self.guest_tree.insert("", "end", values=values)
+            # Determine row styling
+            tags = []
+            
+            # Add alternate row coloring
+            row_index = len(self.guest_tree.get_children())
+            if row_index % 2 == 0:
+                tags.append("even")
+            else:
+                tags.append("odd")
+            
+            # Check if guest is fully checked in at all stations
+            if self._is_guest_fully_checked_in(guest, available_stations):
+                tags = ["complete"]  # Override alternate colors with green
+            
+            item = self.guest_tree.insert("", "end", values=values, tags=tags)
 
-        # Re-configure hover tag after refresh
+        # Re-configure tags after refresh
         self.guest_tree.tag_configure("checkin_hover", background="#ff9800", foreground="black")
+        self.guest_tree.tag_configure("complete", background="#4CAF50", foreground="black")
+        self.guest_tree.tag_configure("odd", background="#2b2b2b")
+        self.guest_tree.tag_configure("even", background="#353535")
 
-        # Apply current sort
-        self._apply_current_sort()
+        # Sort by Last Name A-Ö permanently
+        self._sort_by_lastname()
 
-        # Update sync status
-        registry_stats = self.tag_manager.get_registry_stats()
-        if registry_stats['pending_syncs'] > 0:
-            self.sync_status_label.configure(text=f"⏳ {registry_stats['pending_syncs']} pending", text_color="#ff9800")
-        else:
-            self.sync_status_label.configure(text="✓ All synced", text_color="#4CAF50")
+        # Update Google Sheets connection status
+        self._update_sheets_connection_status()
             
         # Check if we need to refresh station buttons
         self._check_and_refresh_stations()
+
+    def _add_summary_row(self, guests, available_stations, local_check_ins):
+        """Add a summary row showing checked-in counts per station."""
+        # Build summary values: first 3 columns are empty
+        summary_values = ["", "", ""]
+        
+        # Calculate checked-in count for each station
+        for station in available_stations:
+            station_key = station.lower()
+            checked_in_count = 0
+            
+            for guest in guests:
+                # Check both Google Sheets data and local queue
+                sheets_time = guest.get_check_in_time(station_key)
+                local_time = local_check_ins.get(guest.original_id, {}).get(station_key)
+                
+                if sheets_time or local_time:
+                    checked_in_count += 1
+            
+            # Add count in format "checked_in / total"
+            summary_values.append(f"{checked_in_count} / {len(guests)}")
+        
+        # Clear and add to fixed summary tree
+        for item in self.summary_tree.get_children():
+            self.summary_tree.delete(item)
+        
+        summary_item = self.summary_tree.insert("", "end", values=summary_values, tags=["summary"])
+        
+        # Configure summary row styling to match header (use same font as main tree)
+        self.summary_tree.tag_configure("summary", background="#323232", foreground="white", font=("TkFixedFont", 12, "bold"))
+
+    def _sort_by_lastname(self):
+        """Sort guest list by Last Name A-Ö permanently."""
+        items = self.guest_tree.get_children('')
+        
+        if not items:
+            return
+            
+        # Get guest data with last names for sorting
+        guest_data = []
+        for item in items:
+            values = self.guest_tree.item(item)['values']
+            if len(values) >= 3:  # Ensure we have lastname
+                lastname = values[2]  # Last name is in column 2
+                guest_data.append((lastname.lower(), item))  # Lowercase for proper sorting
+        
+        # Sort by lastname A-Ö
+        guest_data.sort(key=lambda x: x[0])
+        
+        # Reorder items
+        for index, (lastname, item) in enumerate(guest_data):
+            self.guest_tree.move(item, '', index)
+
+    def _update_summary_row_immediate(self):
+        """Update just the summary row immediately without refreshing the entire table."""
+        # Get all guest items from main tree (no summary row here now)
+        guest_items = self.guest_tree.get_children('')
+        
+        if not guest_items:
+            return
+            
+        # Get dynamic stations
+        try:
+            available_stations = self._get_stations_cached()
+        except:
+            available_stations = self.config['stations']
+        
+        # Build new summary values
+        summary_values = ["", "", ""]
+        
+        # Get local check-ins for current counts
+        local_check_ins = self.tag_manager.get_all_local_check_ins()
+        
+        # Calculate checked-in count for each station based on current tree values
+        for station in available_stations:
+            station_key = station.lower()
+            checked_in_count = 0
+            
+            for guest_item in guest_items:
+                guest_values = self.guest_tree.item(guest_item)['values']
+                if len(guest_values) >= 3:
+                    guest_id = int(guest_values[0])
+                    
+                    # Find the station column index
+                    station_col_index = None
+                    for i, col_station in enumerate(available_stations):
+                        if col_station.lower() == station_key:
+                            station_col_index = i + 3  # +3 for id, first, last columns
+                            break
+                    
+                    if station_col_index and station_col_index < len(guest_values):
+                        # Check tree value
+                        tree_value = guest_values[station_col_index]
+                        tree_has_checkin = tree_value not in ["-", "", "Check-in"]
+                        
+                        # Check local queue
+                        local_has_checkin = local_check_ins.get(guest_id, {}).get(station_key)
+                        
+                        if tree_has_checkin or local_has_checkin:
+                            checked_in_count += 1
+            
+            # Add count in format "checked_in / total"
+            summary_values.append(f"{checked_in_count} / {len(guest_items)}")
+        
+        # Update the summary tree
+        summary_items = self.summary_tree.get_children('')
+        if summary_items:
+            self.summary_tree.item(summary_items[0], values=summary_values)
+
+    def _check_internet_connection(self):
+        """Check internet connectivity with simple HTTP request."""
+        try:
+            response = requests.get(self.TEST_INTERNET_URL, timeout=self.TEST_INTERNET_TIMEOUT, stream=True)
+            response.raise_for_status()
+            response.close()
+            return True
+        except:
+            return False
+
+    def _periodic_status_check(self):
+        """Periodically check connection status and update sync indicator."""
+        # Only update if not currently refreshing/editing
+        if not self.edit_entry and self._sheets_refresh_lock.acquire(blocking=False):
+            try:
+                self._update_sheets_connection_status()
+            finally:
+                self._sheets_refresh_lock.release()
+        
+        # Schedule next check in 10 seconds
+        self.after(10000, self._periodic_status_check)
+
+    def _start_id_clear_timer(self):
+        """Start 15-second timer to auto-clear guest ID field."""
+        # Cancel any existing timer
+        if hasattr(self, '_id_clear_timer'):
+            self.after_cancel(self._id_clear_timer)
+        
+        # Start new 15-second timer
+        self._id_clear_timer = self.after(15000, self._auto_clear_id_field)
+
+    def _auto_clear_id_field(self):
+        """Auto-clear the guest ID field."""
+        if hasattr(self, 'id_entry'):
+            self.id_entry.delete(0, 'end')
+
+    def _check_internet_periodically(self):
+        """Lightweight periodic internet check that updates status only."""
+        try:
+            # Quick check without blocking
+            current_status = self._check_internet_connection()
+            old_status = self._internet_connected
+            
+            # Update status if changed
+            if current_status != old_status:
+                self._internet_connected = current_status
+                if not current_status:
+                    # Internet lost
+                    self.sync_status_label.configure(text=self.SYNC_STATUS_NO_INTERNET, text_color="#f44336")
+                else:
+                    # Internet restored - check Google Sheets
+                    self._update_sheets_connection_status()
+                    
+        except Exception as e:
+            # Don't log errors to avoid spam
+            pass
+        
+        # Schedule next check in 10 seconds
+        self.after(10000, self._check_internet_periodically)
+
+
+    def _update_sheets_connection_status(self):
+        """Update Google Sheets connection status in sync label."""
+        try:
+            # First check if we have internet (from background monitoring)
+            if not self._internet_connected:
+                self.sync_status_label.configure(text=self.SYNC_STATUS_NO_INTERNET, text_color="#f44336")
+                return
+
+            # Then check Google Sheets specifically
+            if hasattr(self, 'sheets_service') and self.sheets_service:
+                # Try a simple operation to test connectivity
+                stations = self.sheets_service.get_available_stations()
+                if stations:
+                    # Successfully connected
+                    self.sync_status_label.configure(text=self.SYNC_STATUS_CONNECTED, text_color="#4CAF50")
+                else:
+                    # Connected but no data
+                    self.sync_status_label.configure(text=self.SYNC_STATUS_EMPTY, text_color="#ff9800")
+            else:
+                # No sheets service
+                self.sync_status_label.configure(text=self.SYNC_STATUS_OFFLINE, text_color="#f44336")
+        except Exception as e:
+            # Check if it's a rate limiting issue first
+            if "429" in str(e) or "quota" in str(e).lower():
+                self.sync_status_label.configure(text=self.SYNC_STATUS_RATE_LIMITED, text_color="#ff9800")
+            else:
+                # For other Google Sheets specific errors, check internet again
+                if self._check_internet_connection():
+                    # Internet is fine, Google Sheets service issue
+                    self.sync_status_label.configure(text=self.SYNC_STATUS_OFFLINE, text_color="#f44336")
+                else:
+                    # No internet connection
+                    self.sync_status_label.configure(text=self.SYNC_STATUS_NO_INTERNET, text_color="#f44336")
 
     def refresh_guest_data(self, user_initiated=True):
         """Refresh guest data from Google Sheets."""
         if user_initiated:
             self.logger.info("User clicked Refresh Guest Data button")
+            
+        # Quick internet check (no logging for performance)
+        internet_check = self._check_internet_connection()
+            
+        # Skip if editing is in progress
+        if self.edit_entry:
+            if user_initiated:
+                self.update_status("Cannot refresh while editing", "warning")
+            return
+            
         # Skip if already refreshing
         if not self._sheets_refresh_lock.acquire(blocking=False):
             if user_initiated:
                 self.update_status("Refresh already in progress", "warning")
             return
             
+        # Force fresh internet check instead of relying on cached status
+        if not internet_check:
+            self.logger.info(f"Refresh blocked - no internet connection detected (user_initiated: {user_initiated})")
+            self.sync_status_label.configure(text=self.SYNC_STATUS_NO_INTERNET, text_color="#f44336")
+            self._internet_connected = False  # Update cached status
+            if user_initiated:
+                self.update_status("Refresh not available - no internet connection", "error")
+            self._sheets_refresh_lock.release()
+            return
+
         # Show status message only for user-initiated refreshes
         if user_initiated:
             if self.settings_visible:
@@ -3123,6 +3452,13 @@ class NFCApp(ctk.CTk):
     def _refresh_guest_data_thread(self):
         """Thread function for refreshing data."""
         try:
+            # Simple check: if no internet, use cached data
+            if not self._internet_connected:
+                self.after(0, self._update_guest_table, self.guests_data)
+                if hasattr(self, '_is_user_initiated_refresh') and self._is_user_initiated_refresh:
+                    self.after(0, self.update_status, "No internet connection", "error")
+                return
+                
             guests = self.sheets_service.get_all_guests()
             # Resolve any sync conflicts (local data vs Google Sheets)
             self.tag_manager.resolve_sync_conflicts(guests)
@@ -3156,6 +3492,15 @@ class NFCApp(ctk.CTk):
 
         # Reset hover state since all items are deleted
         self.hovered_item = None
+
+        # Get dynamic stations for summary row
+        try:
+            available_stations = self._get_stations_cached()
+        except:
+            available_stations = self.config['stations']
+
+        # Add summary row showing checked-in counts per station
+        self._add_summary_row(guests, available_stations, local_check_ins)
 
         # Track discrepancies for re-sync
         discrepancies = []
@@ -3208,29 +3553,44 @@ class NFCApp(ctk.CTk):
                 else:
                     values.append("-")
 
-            item = self.guest_tree.insert("", "end", values=values)
+            # Determine row styling
+            tags = []
+            
+            # Add alternate row coloring
+            row_index = len(self.guest_tree.get_children())
+            if row_index % 2 == 0:
+                tags.append("even")
+            else:
+                tags.append("odd")
+            
+            # Check if guest is fully checked in at all stations
+            if self._is_guest_fully_checked_in(guest, available_stations):
+                tags = ["complete"]  # Override alternate colors with green
+            
+            item = self.guest_tree.insert("", "end", values=values, tags=tags)
 
         # Handle discrepancies - re-sync items that should be synced but aren't
         if discrepancies:
             self.logger.warning(f"Found {len(discrepancies)} sync discrepancies, re-syncing...")
             self._handle_sync_discrepancies(discrepancies)
 
-        # Re-configure hover tag after refresh
+        # Re-configure tags after refresh
         self.guest_tree.tag_configure("checkin_hover", background="#ff9800", foreground="black")
+        self.guest_tree.tag_configure("complete", background="#4CAF50", foreground="black")
+        self.guest_tree.tag_configure("odd", background="#2b2b2b")
+        self.guest_tree.tag_configure("even", background="#353535")
 
-        # Apply current sort (default to Last Name A-Z on first load)
-        self._apply_current_sort()
+        # Sort by Last Name A-Ö permanently
+        self._sort_by_lastname()
 
-        # Update sync status display
-        if registry_stats['pending_syncs'] > 0:
-            self.sync_status_label.configure(text=f"⏳ {registry_stats['pending_syncs']} pending", text_color="#ff9800")
+        # Update Google Sheets connection status
+        self._update_sheets_connection_status()
 
-            # Force sync on startup if there are pending items
-            if not hasattr(self, '_initial_load_complete'):
-                self.logger.info(f"Found {registry_stats['pending_syncs']} pending syncs at startup - forcing sync")
-                self.after(1000, self._force_sync_on_startup)
-        else:
-            self.sync_status_label.configure(text="✓ All synced", text_color="#4CAF50")
+        # Force sync on startup if there are pending items
+        registry_stats = self.tag_manager.get_registry_stats()
+        if registry_stats['pending_syncs'] > 0 and not hasattr(self, '_initial_load_complete'):
+            self.logger.info(f"Found {registry_stats['pending_syncs']} pending syncs at startup - forcing sync")
+            self.after(1000, self._force_sync_on_startup)
 
         # Only show "Loaded X guests" message at startup
         if not hasattr(self, '_initial_load_complete'):
@@ -3306,7 +3666,16 @@ class NFCApp(ctk.CTk):
         # Split search into words for smart matching
         search_words = search_term.split()
 
-        # Add filtered guests
+        # Get dynamic stations for summary row
+        try:
+            available_stations = self._get_stations_cached()
+        except:
+            available_stations = self.config['stations']
+
+        # Collect filtered guests first to calculate summary
+        filtered_guests = []
+        
+        # Filter guests based on search
         for guest in self.guests_data:
             # Create searchable text from all guest fields
             guest_text = f"{guest.original_id} {guest.firstname} {guest.lastname} {guest.full_name}".lower()
@@ -3322,46 +3691,243 @@ class NFCApp(ctk.CTk):
                 matches = all(word in guest_text for word in search_words)
 
             if matches:
-                values = [
-                    guest.original_id,
-                    guest.firstname,
-                    guest.lastname
-                ]
+                filtered_guests.append(guest)
 
-                # Get dynamic stations
-                # Use cached stations for table population
-                try:
-                    available_stations = self._get_stations_cached()
-                except:
-                    available_stations = self.config['stations']
+        # Add summary row for filtered results
+        self._add_summary_row(filtered_guests, available_stations, local_check_ins)
+
+        # Add filtered guests to table
+        for guest in filtered_guests:
+            values = [
+                guest.original_id,
+                guest.firstname,
+                guest.lastname
+            ]
                 
-                # Add check-in status for each station
-                for station in available_stations:
-                    station_key = station.lower()
-                    
-                    # Ensure the guest has this station in their check_ins dict
-                    if station_key not in guest.check_ins:
-                        guest.check_ins[station_key] = None
-                    
-                    # Google Sheets data takes priority (for manual edits compatibility)
-                    sheets_time = guest.get_check_in_time(station_key)
-                    local_time = local_check_ins.get(guest.original_id, {}).get(station_key)
+            # Add check-in status for each station
+            for station in available_stations:
+                station_key = station.lower()
+                
+                # Ensure the guest has this station in their check_ins dict
+                if station_key not in guest.check_ins:
+                    guest.check_ins[station_key] = None
+                
+                # Google Sheets data takes priority (for manual edits compatibility)
+                sheets_time = guest.get_check_in_time(station_key)
+                local_time = local_check_ins.get(guest.original_id, {}).get(station_key)
 
-                    if sheets_time:
-                        # Google Sheets has data - use it
-                        values.append(f"✓ {sheets_time}")
-                    elif local_time:
-                        # No Google Sheets data but local data exists (pending sync)
-                        values.append(f"✓ {local_time} ⏳")  # Clock emoji indicates pending
-                    elif self.checkin_buttons_visible:
-                        values.append("Check-in")
+                if sheets_time:
+                    # Google Sheets has data - use it
+                    values.append(f"✓ {sheets_time}")
+                elif local_time:
+                    # No Google Sheets data but local data exists (pending sync)
+                    values.append(f"✓ {local_time} ⏳")  # Clock emoji indicates pending
+                elif self.checkin_buttons_visible:
+                    values.append("Check-in")
+                else:
+                    values.append("-")
+
+            # Determine row styling
+            tags = []
+            
+            # Add alternate row coloring
+            row_index = len(self.guest_tree.get_children())
+            if row_index % 2 == 0:
+                tags.append("even")
+            else:
+                tags.append("odd")
+            
+            # Check if guest is fully checked in at all stations
+            if self._is_guest_fully_checked_in(guest, available_stations):
+                tags = ["complete"]  # Override alternate colors with green
+            
+            item = self.guest_tree.insert("", "end", values=values, tags=tags)
+
+        # Sort by Last Name A-Ö permanently
+        self._sort_by_lastname()
+
+    def on_cell_double_click(self, event):
+        """Handle double-click on treeview cell for editing or selection."""
+        # Get the clicked item and column
+        item = self.guest_tree.identify('item', event.x, event.y)
+        column = self.guest_tree.identify('column', event.x, event.y)
+        
+        if not item or not column:
+            return
+        
+        # Get column index
+        col_num = int(column.replace('#', '')) - 1
+        
+        # Get all columns
+        columns = list(self.guest_tree['columns'])
+        
+        # If clicking on ID, First Name, or Last Name columns, treat as guest selection
+        if col_num < 3:
+            self.on_guest_select(event)
+            return
+        
+        # For station columns, enable editing
+        if col_num >= 3:
+            self.start_cell_edit(item, column, col_num)
+    
+    def start_cell_edit(self, item, column, col_num):
+        """Start editing a cell."""
+        # Cancel any existing edit
+        self.cancel_edit()
+        
+        # Get item values and bbox
+        values = self.guest_tree.item(item)['values']
+        bbox = self.guest_tree.bbox(item, column)
+        
+        if not bbox:
+            return
+        
+        # Create entry widget
+        self.edit_entry = tk.Entry(self.guest_tree, justify='center')
+        self.edit_item = item
+        self.edit_column = col_num
+        
+        # Set current value
+        current_value = values[col_num] if col_num < len(values) else ""
+        
+        # Don't allow editing of "Check-in" buttons or "-" placeholders in manual mode
+        if current_value == "Check-in" or (current_value == "-" and self.checkin_buttons_visible):
+            return
+            
+        # Clean up display value (remove checkmarks and emojis)
+        if isinstance(current_value, str):
+            if current_value.startswith("✓"):
+                current_value = current_value[2:].strip()
+            if "⏳" in current_value:
+                current_value = current_value.replace("⏳", "").strip()
+            if current_value == "-":
+                current_value = ""  # Clear the dash for editing
+        
+        self.edit_entry.insert(0, current_value)
+        self.edit_entry.select_range(0, tk.END)
+        
+        # Place and show entry
+        self.edit_entry.place(x=bbox[0], y=bbox[1], width=bbox[2], height=bbox[3])
+        self.edit_entry.focus()
+        
+        # Bind events
+        self.edit_entry.bind('<Return>', self.save_edit)
+        self.edit_entry.bind('<Escape>', lambda e: self.cancel_edit())
+        
+        # Add a delay before binding the global click to avoid processing the current double-click
+        self.after(100, lambda: self.bind_all('<Button-1>', self._on_global_click))
+    
+    def save_edit(self, event=None):
+        """Save the edited value."""
+        if not self.edit_entry or not self.edit_item:
+            return
+        
+        # Prevent multiple save attempts
+        if hasattr(self, '_saving_edit') and self._saving_edit:
+            return
+        self._saving_edit = True
+        
+        try:
+            # Check if the item still exists
+            try:
+                item_values = list(self.guest_tree.item(self.edit_item)['values'])
+            except Exception:
+                # Item was deleted (likely from a refresh)
+                self.cancel_edit()
+                return
+            
+            new_value = self.edit_entry.get().strip()
+            guest_id = item_values[0]
+            
+            # Get station name
+            columns = list(self.guest_tree['columns'])
+            station_name = columns[self.edit_column]
+            
+            # Store the item reference before canceling edit
+            edited_item = self.edit_item
+            edited_column = self.edit_column
+            
+            # Clean up edit widget immediately for responsiveness
+            self.cancel_edit()
+            
+            # Update tree display immediately with hourglass for pending feedback
+            if new_value:
+                # Show with hourglass immediately for user feedback
+                item_values[edited_column] = f"✓ {new_value} ⏳"
+            else:
+                item_values[edited_column] = "-"
+            
+            # Update the tree immediately
+            self.guest_tree.item(edited_item, values=item_values)
+            
+            # Check if we need to update row styling (for complete status)
+            self._update_row_styling(edited_item, guest_id)
+            
+            # Update summary row immediately to reflect the change
+            self._update_summary_row_immediate()
+            
+            # Use queue system to avoid rate limiting, but don't refresh immediately
+            # The sync completion callback will handle refreshes automatically
+            def update_checkin():
+                try:
+                    if new_value:
+                        # Get guest name from tree values (firstname lastname)
+                        guest_name = f"{item_values[1]} {item_values[2]}"
+                        # Add to queue - will sync automatically without rate limit issues
+                        self.tag_manager.check_in_queue.add_check_in(int(guest_id), station_name.lower(), new_value, guest_name)
+                        self.logger.info(f"Queued check-in for guest {guest_id} at {station_name}: {new_value}")
                     else:
-                        values.append("-")
-
-                item = self.guest_tree.insert("", "end", values=values)
-
-        # Apply current sort to filtered results
-        self._apply_current_sort()
+                        # For clears, we can still use direct API since they're less frequent
+                        self.sheets_service.mark_attendance(int(guest_id), station_name, "")
+                        self.logger.info(f"Cleared check-in for guest {guest_id} at {station_name}")
+                except Exception as e:
+                    self.logger.error(f"Error updating check-in: {e}")
+            
+            # Run in background thread
+            self.thread_pool.submit(update_checkin)
+        
+        finally:
+            self._saving_edit = False
+    
+    def cancel_edit(self):
+        """Cancel cell editing."""
+        if self.edit_entry:
+            self.edit_entry.destroy()
+            self.edit_entry = None
+        self.edit_item = None
+        self.edit_column = None
+        self._saving_edit = False
+        # Unbind global click
+        self.unbind_all('<Button-1>')
+    
+    def _on_global_click(self, event):
+        """Handle global click to close edit."""
+        # Only close if we have an active edit and the click wasn't on the entry
+        if self.edit_entry and self.edit_entry.winfo_exists():
+            # Check if click is on the entry widget
+            widget = event.widget
+            if widget != self.edit_entry:
+                self.save_edit()
+    
+    def update_checkin_value(self, guest_id, station, value):
+        """Update a check-in value in Google Sheets."""
+        try:
+            # Use sheets service directly to update
+            result = self.sheets_service.mark_attendance(int(guest_id), station, value)
+            if result:
+                self.logger.info(f"Updated check-in for guest {guest_id} at {station} to: {value}")
+        except Exception as e:
+            self.logger.error(f"Error updating check-in: {e}")
+    
+    def clear_checkin_value(self, guest_id, station):
+        """Clear a check-in value in Google Sheets."""
+        try:
+            # Mark with empty string to clear
+            result = self.sheets_service.mark_attendance(int(guest_id), station, "")
+            if result:
+                self.logger.info(f"Cleared check-in for guest {guest_id} at {station}")
+        except Exception as e:
+            self.logger.error(f"Error clearing check-in: {e}")
 
     def on_guest_select(self, event):
         """Handle guest selection from list."""
@@ -3374,6 +3940,8 @@ class NFCApp(ctk.CTk):
                 # Fill registration form
                 self.id_entry.delete(0, 'end')
                 self.id_entry.insert(0, str(guest_id))
+                # Start 15-second auto-clear timer
+                self._start_id_clear_timer()
             elif self.is_rewrite_mode:
                 # Fill rewrite form
                 self.rewrite_id_entry.delete(0, 'end')
@@ -3758,7 +4326,19 @@ class NFCApp(ctk.CTk):
         self.guest_tree.configure(cursor="")
 
     def on_tree_click(self, event):
-        """Handle click on tree for check-in button."""
+        """Handle click on tree for check-in button and closing edit."""
+        # First, check if we're editing and should save/close
+        if self.edit_entry:
+            # Get the clicked position
+            clicked_item = self.guest_tree.identify("item", event.x, event.y)
+            clicked_column = self.guest_tree.identify("column", event.x, event.y)
+            
+            # If clicking outside the currently edited cell, save and close
+            if clicked_item != self.edit_item or clicked_column != f"#{self.edit_column + 1}":
+                self.save_edit()
+                # Don't process this click further if we were editing
+                return
+        
         # Identify the clicked region
         region = self.guest_tree.identify("region", event.x, event.y)
         if region != "cell":
@@ -3771,15 +4351,33 @@ class NFCApp(ctk.CTk):
         if not item or not column:
             return
 
+        # Skip summary row (first row in tree)
+        all_items = self.guest_tree.get_children()
+        if all_items and item == all_items[0]:
+            return
+
         column_index = int(column.replace('#', '')) - 1
+        values = self.guest_tree.item(item, "values")
+        
         # Station columns start at index 3 (after id, first, last)
         if column_index >= 3 and column_index < 3 + len(self.config['stations']):
-            values = self.guest_tree.item(item, "values")
-
             # Only proceed if it says "Check-in"
             if len(values) > column_index and values[column_index] == "Check-in":
                 guest_id = int(values[0])  # Ensure guest_id is int
                 station = self.config['stations'][column_index - 3]
+
+                # Provide immediate visual feedback in cell
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%H:%M")
+                item_values = list(values)
+                item_values[column_index] = f"✓ {timestamp} ⏳"
+                self.guest_tree.item(item, values=item_values)
+
+                # Update row styling immediately
+                self._update_row_styling(item, guest_id)
+                
+                # Update summary row immediately to reflect the change
+                self._update_summary_row_immediate()
 
                 # Disable the click temporarily to prevent double-clicks
                 self.guest_tree.configure(cursor="wait")
