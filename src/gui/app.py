@@ -148,6 +148,7 @@ class NFCApp(ctk.CTk):
         
         # Apply theme to TreeView immediately after widgets are created
         self._update_treeview_theme()
+        
 
         # Load initial data
         self.after(100, lambda: self.refresh_guest_data(user_initiated=False))
@@ -166,6 +167,9 @@ class NFCApp(ctk.CTk):
 
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Bind ESC key to close dialogs
+        self.bind_all("<Escape>", self.on_escape_key)
         
         # Grab focus when app launches
         self.after(100, self._grab_app_focus)
@@ -620,6 +624,9 @@ class NFCApp(ctk.CTk):
         # Logo on the left
         self.logo_label = ctk.CTkLabel(header_frame, text="", width=80, height=80)
         self.logo_label.pack(side="left", padx=20)
+        
+        # Bind click event for spin animation easter egg
+        self.logo_label.bind("<Button-1>", self.on_logo_click)
 
         # Settings button on the right - modernized hamburger menu
         self.settings_btn = ctk.CTkButton(
@@ -1134,6 +1141,7 @@ class NFCApp(ctk.CTk):
             
         close_btn.bind("<Enter>", on_close_enter)
         close_btn.bind("<Leave>", on_close_leave)
+        
         close_btn.pack()
 
         # Start auto-close countdown
@@ -2632,8 +2640,7 @@ class NFCApp(ctk.CTk):
         # Immediately stop all background scanning
         self.is_scanning = False
         
-        # Debug logging to track scan state
-        self.logger.info(f"Tag info button pressed - NFC lock: {self._nfc_operation_lock}, is_scanning: {self.is_scanning}, scanning_thread_active: {getattr(self, '_scanning_thread_active', False)}")
+        self.logger.info("Tag info button pressed")
         
         # Force stop any active scanning thread
         self._scanning_thread_active = False
@@ -3008,6 +3015,7 @@ class NFCApp(ctk.CTk):
             
         close_btn.bind("<Enter>", on_log_close_enter)
         close_btn.bind("<Leave>", on_log_close_leave)
+        
         close_btn.pack(pady=(0, 20))
         
         # Set up auto-refresh
@@ -3091,12 +3099,23 @@ class NFCApp(ctk.CTk):
         
         # Reset button state when dialog closes
         def on_password_dialog_close():
-            self.dev_mode_btn.configure(
-                fg_color="transparent", 
-                text_color="#6c757d",
-                border_color="#6c757d"
-            )
-            password_window.destroy()
+            # Check if button still exists before configuring
+            try:
+                if hasattr(self, 'dev_mode_btn') and self.dev_mode_btn.winfo_exists():
+                    self.dev_mode_btn.configure(
+                        fg_color="transparent", 
+                        text_color="#6c757d",
+                        border_color="#6c757d"
+                    )
+            except:
+                pass  # Button was already destroyed
+            
+            # Safely destroy window
+            try:
+                if password_window.winfo_exists():
+                    password_window.destroy()
+            except:
+                pass  # Window was already destroyed
             
         password_window.protocol("WM_DELETE_WINDOW", on_password_dialog_close)
 
@@ -3154,7 +3173,8 @@ class NFCApp(ctk.CTk):
             border_width=2,
             fg_color="transparent",
             text_color="#28a745",
-            border_color="#28a745"
+            border_color="#28a745",
+            hover=False  # Disable built-in hover
         )
         
         # Add hover effects for Enter button
@@ -3184,7 +3204,8 @@ class NFCApp(ctk.CTk):
             border_width=2,
             fg_color="transparent",
             text_color="#6c757d",
-            border_color="#6c757d"
+            border_color="#6c757d",
+            hover=False  # Disable built-in hover
         )
         
         # Add hover effects for Cancel button
@@ -3284,7 +3305,8 @@ class NFCApp(ctk.CTk):
             border_width=2,
             fg_color="transparent",
             text_color="#3b82f6",
-            border_color="#3b82f6"
+            border_color="#3b82f6",
+            hover=False  # Disable built-in hover
         )
         
         # Add hover effects for dev close button
@@ -3302,6 +3324,7 @@ class NFCApp(ctk.CTk):
             
         close_btn.bind("<Enter>", on_dev_close_enter)
         close_btn.bind("<Leave>", on_dev_close_leave)
+        
         close_btn.pack(pady=(0, 20))
 
     def clear_all_data(self, dev_window):
@@ -3388,6 +3411,7 @@ class NFCApp(ctk.CTk):
             
         confirm_btn.bind("<Enter>", on_confirm_delete_enter)
         confirm_btn.bind("<Leave>", on_confirm_delete_leave)
+        
         confirm_btn.pack(side="left", padx=10)
 
         cancel_btn = ctk.CTkButton(
@@ -3419,6 +3443,7 @@ class NFCApp(ctk.CTk):
             
         cancel_btn.bind("<Enter>", on_cancel_clear_enter)
         cancel_btn.bind("<Leave>", on_cancel_clear_leave)
+        
         cancel_btn.pack(side="left", padx=10)
 
     def _execute_clear_all_data(self):
@@ -5575,14 +5600,119 @@ class NFCApp(ctk.CTk):
         try:
             logo_path = Path(__file__).parent.parent.parent / "assets" / "logo.png"
             if logo_path.exists():
-                logo_image = Image.open(logo_path)
+                self.original_logo_image = Image.open(logo_path)
                 # Clean downscale from 140x140 to 70x70 (2:1 ratio for crisp results)
-                logo_image = logo_image.resize((70, 70), Image.Resampling.LANCZOS)
+                logo_image = self.original_logo_image.resize((70, 70), Image.Resampling.LANCZOS)
                 logo_ctk = ctk.CTkImage(light_image=logo_image, dark_image=logo_image, size=(70, 70))
                 self.logo_label.configure(image=logo_ctk)
                 self.logo_label.image = logo_ctk
+                
+                # Store original for animations
+                self.original_logo_image = self.original_logo_image.resize((70, 70), Image.Resampling.LANCZOS)
+                self.logo_spinning = False
         except Exception as e:
             self.logger.error(f"Failed to load logo: {e}")
+
+    def on_logo_click(self, event):
+        """Easter egg: spin the logo when clicked."""
+        # Only allow clicking when not spinning and cooldown period has passed
+        if not hasattr(self, 'logo_spinning') or not self.logo_spinning:
+            self.spin_logo()
+
+    def spin_logo(self):
+        """Animate the logo with a smooth spin effect."""
+        if not hasattr(self, 'original_logo_image') or self.original_logo_image is None:
+            return
+            
+        self.logo_spinning = True
+        duration_ms = 800  # Total animation time
+        total_frames = 40   # Smooth animation
+        degrees_per_frame = 360 / total_frames
+        
+        def animate_frame(frame):
+            if frame >= total_frames:
+                # Animation complete, start 500ms cooldown period
+                self.after(500, lambda: setattr(self, 'logo_spinning', False))
+                return
+                
+            # Ease-in-out function for smooth animation
+            t = frame / total_frames
+            eased_t = t * t * (3 - 2 * t)  # Smoothstep function
+            
+            # Calculate rotation angle with easing
+            angle = eased_t * 360
+            
+            try:
+                # Rotate the image
+                rotated_image = self.original_logo_image.rotate(angle, resample=Image.Resampling.BICUBIC, expand=False)
+                
+                # Convert to CTkImage and update
+                logo_ctk = ctk.CTkImage(light_image=rotated_image, dark_image=rotated_image, size=(70, 70))
+                self.logo_label.configure(image=logo_ctk)
+                self.logo_label.image = logo_ctk
+                
+                # Schedule next frame
+                self.after(duration_ms // total_frames, lambda: animate_frame(frame + 1))
+            except Exception as e:
+                self.logger.debug(f"Logo animation frame error: {e}")
+                self.logo_spinning = False
+        
+        # Start animation
+        animate_frame(0)
+
+
+    def on_escape_key(self, event):
+        """Handle ESC key to close dialogs following state management patterns."""
+        
+        # Check current dialog state and call appropriate close function
+        
+        # 1. Tag info display - ALWAYS return to station view
+        if hasattr(self, '_tag_info_auto_close_active') and self._tag_info_auto_close_active:
+            self.close_tag_info()
+            return "break"
+        
+        # 2. Write to tag operation in reception - cancel the write (red Cancel button)
+        if (hasattr(self, '_write_operation_active') and self._write_operation_active and 
+            hasattr(self, 'write_cancel_btn') and self.write_cancel_btn.winfo_exists()):
+            # ESC does same as clicking the red Cancel button
+            self.cancel_write()
+            return "break"
+        
+        # 3. Never interrupt other active NFC operations (but allow write cancellation above)
+        if hasattr(self, 'operation_in_progress') and self.operation_in_progress:
+            return "break"
+        
+        # 4. Rewrite mode - return to Reception registration
+        if hasattr(self, 'is_rewrite_mode') and self.is_rewrite_mode:
+            self.exit_rewrite_mode()
+            return "break"
+        
+        # 5. Settings panel - return to previous station
+        if hasattr(self, 'settings_visible') and self.settings_visible:
+            self.toggle_settings()
+            return "break"
+        
+        # 6. Skip ESC handling if log or developer window is open
+        try:
+            # Check all toplevel windows (CTkToplevel for log/developer dialogs)
+            for toplevel in self.winfo_toplevel().children:
+                widget = self.nametowidget(toplevel)
+                if isinstance(widget, ctk.CTkToplevel):
+                    # Log or developer window is open - skip ESC handling
+                    # Let the dialog handle ESC natively (for text input, etc.)
+                    return
+        except:
+            pass
+        
+        # 7. Manual check-in mode (if the state tracking exists)
+        if hasattr(self, 'checkin_buttons_visible') and getattr(self, 'checkin_buttons_visible', False):
+            # Manual check-in is active - exit it
+            if hasattr(self, 'toggle_manual_checkin'):
+                self.toggle_manual_checkin()
+                return "break"
+        
+        # For any other ESC usage, don't prevent default behavior
+        return
 
     def on_closing(self):
         """Handle window closing."""

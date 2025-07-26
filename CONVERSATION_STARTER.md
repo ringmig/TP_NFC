@@ -1,13 +1,35 @@
 # TP_NFC Conversation Starter
 
+## STRICT OPERATIONAL PROTOCOL:
+
+**BOOTSTRAP SEQUENCE:**
+   - First: Read CONVERSATION_STARTER.md to load project context and previous session state
+   - Second: Review any files mentioned in CONVERSATION_STARTER before proceeding
+   
+
+**STATE SYNCHRONIZATION:**
+   - After code changes: Update relevant tracking files
+     - Improvements.yaml: Remove completed items, add discovered issues and planned features
+     - State_Structure.yaml: Document new patterns or state changes
+     - PROJECT_STATUS.md: Update feature completion status
+   - Keep updates concise but complete
+
+**BOOTSTRAP HANDOFF:**
+   - Final CONVERSATION_STARTER must enable next session to continue seamlessly
+   - Include specific method names, line numbers, and error states
+   - Document any locks, flags, or states that were in progress
+   - Prioritize "what was I doing" over "what I did"
+
+
 ## Project Context
 **Project:** TP_NFC - NFC attendance tracking system with GUI  
 **Location:** `/Users/howard/Documents/GitHub/TP_NFC/`  
 **Key Files:** To read before attempting to implement improvements
 - `src/gui/app.py` - Main GUI application (4200+ lines, CustomTkinter)
-- `State_Structure.yaml` - Complete documentation of threading patterns and race conditions
+- `State_Structure.yaml` - Complete state management documentation: threading patterns, race conditions, dialog behaviors, keyboard shortcuts, and UI element reference (button names, state flags)
 - `PROJECT_STATUS.md` - Overall project status and completed features
 - `Improvements.yaml` - Roadmap for fixes (preserve functionality)
+- `CLAUDE.md` - Automatic compacted conversation summary
 
 ## Current Session Summary (Complete UI Modernization & Bug Fixes)
 
