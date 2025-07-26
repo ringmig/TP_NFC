@@ -11,7 +11,7 @@ from datetime import datetime
 class GuestRecord:
     """Model representing a guest record from the spreadsheet."""
     
-    def __init__(self, original_id: int, firstname: str, lastname: str, stations: List[str] = None):
+    def __init__(self, original_id: int, firstname: str, lastname: str, stations: List[str] = None, mobile_number: str = None):
         """
         Initialize guest record.
         
@@ -20,11 +20,13 @@ class GuestRecord:
             firstname: Guest's first name
             lastname: Guest's last name
             stations: List of station names to initialize (if None, uses default stations)
+            mobile_number: Guest's mobile phone number
         """
         self.original_id = original_id
         self.firstname = firstname
         self.lastname = lastname
         self.full_name = f"{firstname} {lastname}"
+        self.mobile_number = mobile_number
         
         # Station check-ins (station_name -> timestamp string or datetime)
         # Initialize with provided stations or default hardcoded ones
@@ -105,6 +107,17 @@ class GuestRecord:
     def get_all_stations(self) -> List[str]:
         """Get list of all available stations for this guest."""
         return list(self.check_ins.keys())
+    
+    def get_formatted_phone(self) -> str:
+        """Get formatted phone number with + prefix, or 'No number' if empty."""
+        if not self.mobile_number or not str(self.mobile_number).strip():
+            return "No number"
+        
+        # Clean the number (remove spaces, dashes, etc) and add + prefix
+        phone = str(self.mobile_number).strip()
+        if not phone.startswith('+'):
+            phone = '+' + phone
+        return phone
         
     def __str__(self) -> str:
         """String representation of the guest."""

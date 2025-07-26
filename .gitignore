@@ -34,12 +34,14 @@ ENV/
 logs/*.log
 *.log
 
-# Configuration files
+# Configuration files (sensitive data)
 config/credentials.json
 config/token.json
 config/token.pickle
 config/tag_registry.json
 config/check_in_queue.json
+config/guest_cache.json
+config/*.backup
 
 # OS files
 .DS_Store

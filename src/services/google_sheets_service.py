@@ -42,6 +42,64 @@ class GoogleSheetsService:
         self._cached_stations = None  # Cache for dynamic station detection
         self._connection_retries = 3  # Number of retries for network errors
         
+        # Guest data caching
+        self._cached_guests = []
+        self.guest_cache_file = Path("config/guest_cache.json")
+        
+        # Load cached guest data
+        self.load_guest_cache()
+        
+    def load_guest_cache(self) -> None:
+        """Load cached guest data from file."""
+        if self.guest_cache_file.exists():
+            try:
+                with open(self.guest_cache_file, 'r') as f:
+                    cached_data = json.load(f)
+                    # Convert dict data back to GuestRecord objects
+                    from ..models import GuestRecord
+                    self._cached_guests = []
+                    for guest_data in cached_data:
+                        guest = GuestRecord(
+                            original_id=guest_data['original_id'],
+                            firstname=guest_data['firstname'],
+                            lastname=guest_data['lastname'],
+                            stations=guest_data.get('station_names', []),
+                            mobile_number=guest_data.get('mobile_number', '')
+                        )
+                        # Restore check-ins
+                        if 'check_ins' in guest_data:
+                            guest.check_ins = guest_data['check_ins']
+                        self._cached_guests.append(guest)
+                self.logger.info(f"Loaded {len(self._cached_guests)} guests from cache")
+            except Exception as e:
+                self.logger.warning(f"Failed to load guest cache: {e}")
+                self._cached_guests = []
+        else:
+            self.logger.debug("No guest cache file found")
+    
+    def save_guest_cache(self, guests: List) -> None:
+        """Save guest data to cache file."""
+        try:
+            self.guest_cache_file.parent.mkdir(exist_ok=True)
+            # Convert GuestRecord objects to dict for JSON serialization
+            cache_data = []
+            for guest in guests:
+                guest_dict = {
+                    'original_id': guest.original_id,
+                    'firstname': guest.firstname,
+                    'lastname': guest.lastname,
+                    'mobile_number': getattr(guest, 'mobile_number', ''),
+                    'check_ins': getattr(guest, 'check_ins', {}),
+                    'station_names': getattr(guest, 'station_names', list(guest.check_ins.keys()) if hasattr(guest, 'check_ins') else [])
+                }
+                cache_data.append(guest_dict)
+            
+            with open(self.guest_cache_file, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+            self.logger.debug(f"Saved {len(guests)} guests to cache")
+        except Exception as e:
+            self.logger.warning(f"Failed to save guest cache: {e}")
+
     def authenticate(self) -> bool:
         """
         Authenticate with Google Sheets API.
@@ -122,7 +180,7 @@ class GoogleSheetsService:
             except (ssl.SSLError, socket.error, ConnectionError, OSError) as e:
                 if attempt < self._connection_retries - 1:
                     wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
-                    self.logger.debug(f"Network error (attempt {attempt + 1}), retrying in {wait_time}s: {e}")
+                    self.logger.warning(f"Network error (attempt {attempt + 1}/{self._connection_retries}) - retrying in {wait_time}s: {e}")
                     time.sleep(wait_time)
                     continue
                 else:
@@ -132,7 +190,7 @@ class GoogleSheetsService:
                 # Retry certain HTTP errors that may be transient
                 if e.resp.status in [500, 502, 503, 504] and attempt < self._connection_retries - 1:
                     wait_time = 2 ** attempt  # Exponential backoff
-                    self.logger.debug(f"HTTP error {e.resp.status} (attempt {attempt + 1}), retrying in {wait_time}s")
+                    self.logger.warning(f"HTTP error {e.resp.status} (attempt {attempt + 1}/{self._connection_retries}) - retrying in {wait_time}s")
                     time.sleep(wait_time)
                     continue
                 else:
@@ -142,9 +200,12 @@ class GoogleSheetsService:
                 # Non-network errors should not be retried
                 raise e
     
-    def get_dynamic_stations(self) -> Dict[str, str]:
+    def get_dynamic_stations(self, fast_fail_startup=False) -> Dict[str, str]:
         """
         Dynamically detect station columns from Google Sheets headers.
+        
+        Args:
+            fast_fail_startup: If True, use minimal retries for faster startup
         
         Returns:
             Dict mapping station names (lowercase) to column letters
@@ -155,23 +216,40 @@ class GoogleSheetsService:
                 
             # Get first row (headers) from spreadsheet with retry logic
             range_name = f"{self.sheet_name}!1:1"
-            result = self._make_api_call(
-                lambda: self._get_thread_safe_service().spreadsheets().values().get(
-                    spreadsheetId=self.spreadsheet_id,
-                    range=range_name
-                ).execute()
-            )
+            
+            # Use fast-fail for startup to prevent hanging
+            if fast_fail_startup:
+                try:
+                    # Single attempt with short timeout for startup
+                    result = self._get_thread_safe_service().spreadsheets().values().get(
+                        spreadsheetId=self.spreadsheet_id,
+                        range=range_name
+                    ).execute()
+                    self.logger.debug("Fetched stations from Google Sheets (startup)")
+                except Exception as e:
+                    # Immediate fallback during startup
+                    self.logger.debug(f"Station fetch failed during startup, using fallback: {e}")
+                    raise e
+            else:
+                # Normal retry logic for runtime calls
+                result = self._make_api_call(
+                    lambda: self._get_thread_safe_service().spreadsheets().values().get(
+                        spreadsheetId=self.spreadsheet_id,
+                        range=range_name
+                    ).execute()
+                )
+                self.logger.debug("Fetched stations from Google Sheets (runtime)")
             
             headers = result.get('values', [[]])[0] if result.get('values') else []
             
             # Build station mapping dynamically
             station_columns = {}
             
-            # Known fixed columns (originalid, firstname, lastname)
-            expected_fixed_cols = ['originalid', 'firstname', 'lastname']
+            # Known fixed columns (originalid, firstname, lastname, mobilenumber)
+            expected_fixed_cols = ['originalid', 'firstname', 'lastname', 'mobilenumber']
             
-            # Start from column D (index 3) to look for station headers
-            for i, header in enumerate(headers[3:], start=3):
+            # Start from column E (index 4) to look for station headers (mobile number is in column D)
+            for i, header in enumerate(headers[4:], start=4):
                 try:
                     if header and isinstance(header, str) and header.strip():  # Only process string headers
                         # Skip any non-alphabetic content (images, formulas, etc.)
@@ -190,20 +268,26 @@ class GoogleSheetsService:
             return station_columns
             
         except Exception as e:
-            # Only log first error, then use debug for subsequent ones
-            if not hasattr(self, '_dynamic_stations_error_logged'):
-                self.logger.error(f"Error detecting dynamic stations: {e}")
-                self._dynamic_stations_error_logged = True
+            # Clear logging for station fetching failures
+            if fast_fail_startup:
+                self.logger.info(f"Could not fetch stations - using fallback: {e}")
             else:
-                self.logger.debug(f"Dynamic stations API call failed: {e}")
+                # Only log first error, then use debug for subsequent ones
+                if not hasattr(self, '_dynamic_stations_error_logged'):
+                    self.logger.warning(f"Could not fetch stations - retrying with fallback: {e}")
+                    self._dynamic_stations_error_logged = True
+                else:
+                    self.logger.debug(f"Dynamic stations API call failed: {e}")
+                    self.logger.debug("Using cached fallback stations")
             
             # Fallback to hardcoded stations (cached to avoid repeated failures)
+            # Note: Station columns shifted right due to mobile number in column D
             fallback_stations = {
-                'reception': 'D',
-                'lio': 'E', 
-                'juntos': 'F',
-                'experimental': 'G',
-                'unvrs': 'H'
+                'reception': 'E',
+                'lio': 'F', 
+                'juntos': 'G',
+                'experimental': 'H',
+                'unvrs': 'I'
             }
             self._cached_stations = fallback_stations
             return fallback_stations
@@ -229,9 +313,24 @@ class GoogleSheetsService:
         """
         try:
             # Get dynamic station mapping first
-            station_columns = self.get_dynamic_stations()
+            try:
+                station_columns = self.get_dynamic_stations()
+            except Exception as station_error:
+                self.logger.warning(f"Failed to get dynamic stations: {station_error}")
+                # Return cached data if available when station detection fails
+                if self._cached_guests:
+                    self.logger.info(f"Station detection failed, using cached guest data ({len(self._cached_guests)} guests)")
+                    return self._cached_guests
+                return []
             
             # Calculate the last column letter based on detected stations
+            if not station_columns:
+                self.logger.warning("No station columns detected")
+                if self._cached_guests:
+                    self.logger.info(f"No stations detected, using cached guest data ({len(self._cached_guests)} guests)")
+                    return self._cached_guests
+                return []
+                
             max_col_index = max([ord(col) - ord('A') for col in station_columns.values()] + [7])  # At least H
             last_col_letter = self._index_to_column_letter(max_col_index)
             
@@ -249,6 +348,10 @@ class GoogleSheetsService:
             
             if not values:
                 self.logger.warning("No data found in spreadsheet")
+                # Return cached data if available when spreadsheet is empty
+                if self._cached_guests:
+                    self.logger.info(f"Spreadsheet empty, using cached guest data ({len(self._cached_guests)} guests)")
+                    return self._cached_guests
                 return []
                 
             # First row should be headers
@@ -266,12 +369,17 @@ class GoogleSheetsService:
                 try:
                     # Ensure we have at least the required fields
                     if len(row) >= 3:
-                        original_id = int(row[0])
+                        # Clean the ID field by removing BOM and other non-numeric characters
+                        id_str = str(row[0]).strip().lstrip('\ufeff')
+                        original_id = int(id_str)
                         firstname = row[1]
                         lastname = row[2]
                         
-                        # Initialize guest with dynamic stations
-                        guest = GuestRecord(original_id, firstname, lastname, station_names)
+                        # Get mobile number from column D (index 3) if available
+                        mobile_number = row[3] if len(row) > 3 else None
+                        
+                        # Initialize guest with dynamic stations and mobile number
+                        guest = GuestRecord(original_id, firstname, lastname, station_names, mobile_number)
                         
                         # Dynamically load check-ins based on detected stations
                         for col_letter, station_name in col_to_station.items():
@@ -286,10 +394,24 @@ class GoogleSheetsService:
                     continue
                     
             self.logger.info(f"Fetched {len(guests)} guests from spreadsheet")
+            # Save successful fetch to cache
+            self.save_guest_cache(guests)
+            self._cached_guests = guests  # Update in-memory cache
             return guests
             
         except HttpError as e:
             self.logger.error(f"Error fetching data from Google Sheets: {e}")
+            # Return cached data if available
+            if self._cached_guests:
+                self.logger.info(f"Using cached guest data ({len(self._cached_guests)} guests)")
+                return self._cached_guests
+            return []
+        except Exception as e:
+            self.logger.error(f"Unexpected error fetching guests: {e}")
+            # Return cached data if available
+            if self._cached_guests:
+                self.logger.info(f"Using cached guest data ({len(self._cached_guests)} guests)")
+                return self._cached_guests
             return []
             
     def find_guest_by_id(self, original_id: int) -> Optional[GuestRecord]:
@@ -330,19 +452,25 @@ class GoogleSheetsService:
             
             # Find the row with matching ID
             for i, row in enumerate(values[1:], start=2):  # Start from row 2 (skip header)
-                if len(row) > 0 and str(row[0]) == str(original_id):
-                    if len(row) >= 3:
-                        # Initialize guest with dynamic stations
-                        guest = GuestRecord(int(row[0]), row[1], row[2], station_names)
-                        guest.row_number = i  # Store row number for updates
+                if len(row) > 0:
+                    # Clean the ID field by removing BOM and other non-numeric characters
+                    row_id_str = str(row[0]).strip().lstrip('\ufeff')
+                    if row_id_str == str(original_id):
+                        if len(row) >= 3:
+                            # Get mobile number from column D (index 3) if available
+                            mobile_number = row[3] if len(row) > 3 else None
                         
-                        # Dynamically load check-in data based on detected stations
-                        for col_letter, station_name in col_to_station.items():
-                            col_index = ord(col_letter) - ord('A')  # Convert A=0, B=1, etc.
-                            if len(row) > col_index and row[col_index]:
-                                guest.check_ins[station_name] = row[col_index]
+                            # Initialize guest with dynamic stations and mobile number
+                            guest = GuestRecord(int(row_id_str), row[1], row[2], station_names, mobile_number)
+                            guest.row_number = i  # Store row number for updates
                             
-                        return guest
+                            # Dynamically load check-in data based on detected stations
+                            for col_letter, station_name in col_to_station.items():
+                                col_index = ord(col_letter) - ord('A')  # Convert A=0, B=1, etc.
+                                if len(row) > col_index and row[col_index]:
+                                    guest.check_ins[station_name] = row[col_index]
+                                
+                            return guest
                         
             self.logger.warning(f"Guest with ID {original_id} not found")
             return None
@@ -400,9 +528,12 @@ class GoogleSheetsService:
             self.logger.error(f"Error marking attendance: {e}")
             return False
     
-    def get_available_stations(self) -> List[str]:
+    def get_available_stations(self, fast_fail_startup=False) -> List[str]:
         """
         Get list of available station names for the GUI.
+        
+        Args:
+            fast_fail_startup: If True, use minimal retries for faster startup
         
         Returns:
             List of station names in consistent title case formatting (never fails)
@@ -413,7 +544,7 @@ class GoogleSheetsService:
                 return [station.title() for station in self._cached_stations.keys()]
             
             # Only make API call if not cached
-            station_columns = self.get_dynamic_stations()
+            station_columns = self.get_dynamic_stations(fast_fail_startup)
             return [station.title() for station in station_columns.keys()]
         except Exception as e:
             # Silent fallback - don't log repeated errors
@@ -423,12 +554,13 @@ class GoogleSheetsService:
             
     def get_station_column(self, station: str) -> str:
         """Get the column letter for a given station."""
+        # Note: Station columns shifted right due to mobile number in column D
         station_columns = {
-            'reception': 'D',
-            'lio': 'E',
-            'juntos': 'F',
-            'experimental': 'G',
-            'unvrs': 'H'
+            'reception': 'E',
+            'lio': 'F',
+            'juntos': 'G',
+            'experimental': 'H',
+            'unvrs': 'I'
         }
         return station_columns.get(station.lower(), '')
         
@@ -483,10 +615,10 @@ class GoogleSheetsService:
             return False
             
     def clear_all_check_in_data(self) -> bool:
-        """Clear all check-in data from Google Sheets (columns D-H)."""
+        """Clear all check-in data from Google Sheets (columns E-I, preserving mobile numbers in D)."""
         try:
-            # Get all rows to determine range
-            range_name = f"{self.sheet_name}!A:H"
+            # Get all rows to determine range (extending to I due to column shift)
+            range_name = f"{self.sheet_name}!A:I"
             result = self._make_api_call(
                 lambda: self._get_thread_safe_service().spreadsheets().values().get(
                     spreadsheetId=self.spreadsheet_id,
@@ -499,10 +631,10 @@ class GoogleSheetsService:
                 self.logger.info("No check-in data to clear")
                 return True
                 
-            # Clear check-in columns (D-H) for all data rows
-            clear_range = f"{self.sheet_name}!D2:H{len(values)}"
+            # Clear check-in columns (E-I) for all data rows, preserving mobile numbers in D
+            clear_range = f"{self.sheet_name}!E2:I{len(values)}"
             
-            # Create empty values for clearing
+            # Create empty values for clearing (5 columns: E, F, G, H, I)
             clear_values = [[""] * 5 for _ in range(len(values) - 1)]  # 5 columns, all rows except header
             
             body = {

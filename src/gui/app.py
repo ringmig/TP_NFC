@@ -11,6 +11,7 @@ from tkinter import ttk
 import threading
 from typing import Optional, List, Dict
 from datetime import datetime
+import time
 from PIL import Image
 import os
 import platform
@@ -22,6 +23,73 @@ import requests
 # Configure CustomTkinter
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
+
+# Theme Colors - Easy customization
+THEME_COLORS = {
+    # Background colors for different UI areas
+    'window_background_dark': "#212121",   # Outer padded area in dark mode
+    'window_background_light': "#f0f0f0",  # Outer padded area in light mode
+    'main_frame_dark': "#212121",          # Main container (spaces between frames) in dark mode
+    'main_frame_light': "#f0f0f0",         # Main container (spaces between frames) in light mode
+    'header_frame_dark': "#2b2b2b",        # Header area (logo + stations) in dark mode
+    'header_frame_light': "#dde0e4",       # Header area (logo + stations) in light mode
+    'content_frame_dark': "#2b2b2b",       # Main content area in dark mode  
+    'content_frame_light': "#dde0e4",      # Main content area in light mode
+    'status_frame_dark': "#2b2b2b",        # Status bar area in dark mode
+    'status_frame_light': "#dde0e4",       # Status bar area in light mode
+    'guest_list_frame_dark': "#2b2b2b",    # Guest list panel in dark mode
+    'guest_list_frame_light': "#dde0e4",   # Guest list panel in light mode
+    
+    # Button colors
+    'button_blue': "#3b82f6",
+    'button_orange': "#ff9800", 
+    'button_green': "#4CAF50",
+    'button_red': "#dc3545",
+    'button_grey': "#6c757d",
+    'button_purple': "#9c27b0",
+    'button_selected_orange': "#ff6b35",
+    
+    # Status colors
+    'status_success': "#4CAF50",
+    'status_error': "#dc3545", 
+    'status_warning': "#ff9800",
+    'status_info': "#3b82f6",
+    
+    # Theme toggle colors
+    'theme_dark_text': "#e0e0e0",
+    'theme_light_text': "#404040",
+    
+    # TreeView colors 
+    # Light mode TreeView
+    'treeview_bg_light': "#ffffff",          # Main tree background
+    'treeview_text_light': "#212529",        # Text color
+    'treeview_heading_light': "#dde0e4",     # Column headers
+    'treeview_odd_row_light': "#ededee",     # Alternating row color 1
+    'treeview_even_row_light': "#ffffff",    # Alternating row color 2  
+    'treeview_summary_light': "#dde0e4",     # Summary row background
+    'treeview_selected_bg_light': "#cce5ff", # Selected row background
+    'treeview_selected_fg_light': "#004085", # Selected row text
+    
+    # Dark mode TreeView
+    'treeview_bg_dark': "#212121",           # Main tree background
+    'treeview_text_dark': "white",           # Text color
+    'treeview_heading_dark': "#2b2b2b",      # Column headers
+    'treeview_odd_row_dark': "#2b2b2b",      # Alternating row color 1
+    'treeview_even_row_dark': "#353535",     # Alternating row color 2
+    'treeview_summary_dark': "#323232",      # Summary row background
+    'treeview_selected_bg_dark': "#4a4a4a",  # Selected row background
+    'treeview_selected_fg_dark': "white",    # Selected row text
+    
+    # TreeView special tags (theme-independent)
+    'treeview_complete_bg': "#4CAF50",       # Fully checked-in guests (green)
+    'treeview_complete_fg': "black",         # Text on complete background
+    'treeview_hover_bg': "#ff9800",          # Manual check-in hover (orange)
+    'treeview_hover_fg': "black",            # Text on hover background
+    
+    # TreeView normal hover colors (theme-specific)
+    'treeview_normal_hover_light': "#e3f2fd", # Light blue hover in light mode
+    'treeview_normal_hover_dark': "#424242",   # Grey hover in dark mode
+}
 
 
 class NFCApp(ctk.CTk):
@@ -35,18 +103,18 @@ class NFCApp(ctk.CTk):
     STATUS_CHECKIN_PAUSED = "Check-in Paused"
     STATUS_NFC_NOT_CONNECTED = "⚠️ NFC READER NOT CONNECTED"
     STATUS_NFC_CONNECTED = "✅ NFC reader connected"
-    STATUS_NO_TAG_DETECTED = "No tag detected"
-    STATUS_PLEASE_ENTER_GUEST_ID = "Please enter a Guest ID"
+    STATUS_NO_TAG_DETECTED = "No tag detected - try again"
+    STATUS_PLEASE_ENTER_GUEST_ID = "Please enter a Guest ID first"
     STATUS_INVALID_ID_FORMAT = "Invalid ID format"
-    STATUS_TAG_ALREADY_REGISTERED = "⚠️ Tag already registered to {guest_name}"
+    STATUS_TAG_ALREADY_REGISTERED = "Tag already registered to {guest_name}"
     
     # Sync status label constants
     SYNC_STATUS_CONNECTED = "◉"
     SYNC_STATUS_EMPTY = "⚠️ Sheets Empty"
     SYNC_STATUS_RATE_LIMITED = "⚠️ Rate Limited"
-    SYNC_STATUS_NO_INTERNET = "✗ No Internet"
-    SYNC_STATUS_OFFLINE = "✗ Google Service Offline"
-    SYNC_STATUS_ERROR = "✗ Sync Failed"
+    SYNC_STATUS_NO_INTERNET = "⚠️ No Internet"
+    SYNC_STATUS_OFFLINE = "⚠️ Google Service Offline"
+    SYNC_STATUS_ERROR = "⚠️ Sync Failed"
     
     # Internet connectivity test constants
     TEST_INTERNET_URL = "http://www.google.com"
@@ -577,15 +645,68 @@ class NFCApp(ctk.CTk):
 
     def create_widgets(self):
         """Create all UI widgets."""
-        # Main container with padding
-        self.main_frame = ctk.CTkFrame(self, corner_radius=0)
+        # Configure window background (the padded area outside main UI) - theme aware
+        self._update_window_background()
+        
+        # Main container with padding - background area controlled by THEME_COLORS
+        main_bg_color = THEME_COLORS['main_frame_light'] if self.is_light_mode else THEME_COLORS['main_frame_dark']
+        self.main_frame = ctk.CTkFrame(self, corner_radius=0, fg_color=main_bg_color)
         self.main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
         # Header frame
         self.create_header()
+        
+        # Content frame
+        self.create_content_frame()
 
-        # Content frame (compact size)
-        self.content_frame = ctk.CTkFrame(self.main_frame, corner_radius=15, height=200)
+    def _update_window_background(self):
+        """Update window background color based on current theme."""
+        if hasattr(self, 'is_light_mode') and self.is_light_mode:
+            bg_color = THEME_COLORS['window_background_light']
+        else:
+            bg_color = THEME_COLORS['window_background_dark']
+        self.configure(fg_color=bg_color)
+
+    def _update_all_frame_backgrounds(self):
+        """Update all frame background colors based on current theme."""
+        # Update window background
+        self._update_window_background()
+        
+        # Update individual frames if they exist
+        is_light = hasattr(self, 'is_light_mode') and self.is_light_mode
+        
+        # Main frame (spaces between other frames)
+        if hasattr(self, 'main_frame'):
+            bg_color = THEME_COLORS['main_frame_light'] if is_light else THEME_COLORS['main_frame_dark']
+            self.main_frame.configure(fg_color=bg_color)
+        
+        # Header frame - find it in the main_frame children
+        for child in self.main_frame.winfo_children():
+            if isinstance(child, ctk.CTkFrame) and child.cget('height') == 80:  # Header frame
+                bg_color = THEME_COLORS['header_frame_light'] if is_light else THEME_COLORS['header_frame_dark']
+                child.configure(fg_color=bg_color)
+                break
+        
+        # Content frame
+        if hasattr(self, 'content_frame'):
+            bg_color = THEME_COLORS['content_frame_light'] if is_light else THEME_COLORS['content_frame_dark']
+            self.content_frame.configure(fg_color=bg_color)
+        
+        # Status frame
+        if hasattr(self, 'status_frame'):
+            bg_color = THEME_COLORS['status_frame_light'] if is_light else THEME_COLORS['status_frame_dark']
+            self.status_frame.configure(fg_color=bg_color)
+        
+        # Guest list frame
+        if hasattr(self, 'list_frame'):
+            bg_color = THEME_COLORS['guest_list_frame_light'] if is_light else THEME_COLORS['guest_list_frame_dark']
+            self.list_frame.configure(fg_color=bg_color)
+
+    def create_content_frame(self):
+        """Create content frame."""
+        # Theme-aware content frame (compact size)
+        bg_color = THEME_COLORS['content_frame_light'] if self.is_light_mode else THEME_COLORS['content_frame_dark']
+        self.content_frame = ctk.CTkFrame(self.main_frame, corner_radius=15, height=200, fg_color=bg_color)
         self.content_frame.pack(fill="x", pady=(20, 10))
         self.content_frame.pack_propagate(False)
 
@@ -617,7 +738,9 @@ class NFCApp(ctk.CTk):
 
     def create_header(self):
         """Create header with logo and station selector."""
-        header_frame = ctk.CTkFrame(self.main_frame, corner_radius=15, height=80)
+        # Theme-aware header frame
+        bg_color = THEME_COLORS['header_frame_light'] if self.is_light_mode else THEME_COLORS['header_frame_dark']
+        header_frame = ctk.CTkFrame(self.main_frame, corner_radius=15, height=80, fg_color=bg_color)
         header_frame.pack(fill="x", pady=(0, 10))
         header_frame.pack_propagate(False)
 
@@ -695,11 +818,9 @@ class NFCApp(ctk.CTk):
         # Get dynamic stations from Google Sheets (or fallback to config)
         available_stations = self.config['stations']  # Default
         
-        self.logger.info("Fetching stations...")
-        
-        # Use cached stations to avoid repeated API calls
+        # Use cached stations to avoid repeated API calls - fast-fail during startup
         try:
-            available_stations = self._get_filtered_stations_for_view()
+            available_stations = self._get_filtered_stations_for_view(fast_fail_startup=True)
         except Exception as e:
             self.logger.warning(f"Could not get stations: {e}")
             available_stations = self.config['stations']
@@ -749,7 +870,9 @@ class NFCApp(ctk.CTk):
 
     def create_status_bar(self):
         """Create status bar."""
-        self.status_frame = ctk.CTkFrame(self.main_frame, corner_radius=10, height=75)
+        # Theme-aware status frame
+        bg_color = THEME_COLORS['status_frame_light'] if self.is_light_mode else THEME_COLORS['status_frame_dark']
+        self.status_frame = ctk.CTkFrame(self.main_frame, corner_radius=10, height=75, fg_color=bg_color)
         self.status_frame.pack(fill="x", pady=(10, 10))
         self.status_frame.pack_propagate(False)
 
@@ -791,7 +914,9 @@ class NFCApp(ctk.CTk):
 
     def create_guest_list_panel(self):
         """Create guest list panel."""
-        self.list_frame = ctk.CTkFrame(self.main_frame, corner_radius=15)
+        # Theme-aware guest list frame
+        bg_color = THEME_COLORS['guest_list_frame_light'] if self.is_light_mode else THEME_COLORS['guest_list_frame_dark']
+        self.list_frame = ctk.CTkFrame(self.main_frame, corner_radius=15, fg_color=bg_color)
         # Initially hidden
 
         # Search bar
@@ -811,21 +936,32 @@ class NFCApp(ctk.CTk):
         )
         self.search_entry.pack(side="left")
 
+        # Station view toggle container
+        self.switch_container = ctk.CTkFrame(search_frame, fg_color="transparent")
+        
+        # Station view toggle label (on the left)
+        self.station_view_label = ctk.CTkLabel(
+            self.switch_container,
+            text="All Stations",
+            font=self.fonts['button']
+        )
+        self.station_view_label.pack(side="left", padx=(0, 10))
+        
         # Station view toggle switch (modern toggle)
         self.station_view_switch = ctk.CTkSwitch(
-            search_frame,
-            text="All Stations",
+            self.switch_container,
+            text="",  # No text on the switch itself
             command=self.toggle_station_view,
-            width=120,
+            width=60,
             height=24,
             button_color="#2196F3",
-            progress_color="#1976D2",
-            font=self.fonts['button']
+            progress_color="#1976D2"
         )
         # Set initial state (True = All Stations, False = Single Station)
         self.station_view_switch.select()
+        self.station_view_switch.pack(side="left")
         
-        # Manual check-in button (moved here from action buttons)
+        # Manual check-in button
         self.manual_checkin_btn = ctk.CTkButton(
             search_frame,
             text="Manual Check-in",
@@ -838,7 +974,7 @@ class NFCApp(ctk.CTk):
             fg_color="transparent",
             text_color="#ff9800",
             border_color="#ff9800",
-            hover=False  # Disable built-in hover
+            hover=False
         )
         
         # Add hover effects for manual checkin button
@@ -950,6 +1086,10 @@ class NFCApp(ctk.CTk):
         # Bind click for check-in button and closing edit
         self.guest_tree.bind("<Button-1>", self.on_tree_click)
         
+        # Disable selection entirely by setting selectmode to 'none'
+        self.guest_tree.configure(selectmode='none')
+        
+        
         # Track editing state
         self.edit_entry = None
         self.edit_item = None
@@ -958,15 +1098,32 @@ class NFCApp(ctk.CTk):
         # Track internet connection status
         self._internet_connected = True
 
-        # Bind mouse motion for cursor changes
+        # Bind mouse motion for cursor changes and tooltips
         self.guest_tree.bind("<Motion>", self.on_tree_motion)
+        self.guest_tree.bind("<Leave>", self.on_tree_leave)
+        # Bind scroll events to update the hover at current mouse position
+        self.guest_tree.bind("<MouseWheel>", self._on_scroll)  # For Windows/macOS
+        self.guest_tree.bind("<Button-4>", self._on_scroll)    # For Linux scroll up
+        self.guest_tree.bind("<Button-5>", self._on_scroll)    # For Linux scroll down
+        
+        # Disable hover/click effects for summary tree
+        self.summary_tree.bind("<Motion>", lambda e: None)
+        self.summary_tree.bind("<Leave>", lambda e: None)
+        self.summary_tree.bind("<Button-1>", lambda e: "break")  # Prevent clicks
+        
+        # Tooltip state tracking
+        self._tooltip_timer = None
+        self._tooltip_window = None
+        self._tooltip_item = None
+        self._tooltip_column = None
+        
 
         # Column headers without sorting functionality
         self.guest_tree.pack(fill="both", expand=True)
 
         # Configure tags for styling (like working version)
-        self.guest_tree.tag_configure("checkin_hover", background="#ff9800", foreground="black")
-        self.guest_tree.tag_configure("complete", background="#4CAF50", foreground="black")
+        self.guest_tree.tag_configure("checkin_hover", background=THEME_COLORS['treeview_hover_bg'], foreground=THEME_COLORS['treeview_hover_fg'])
+        self.guest_tree.tag_configure("complete", background=THEME_COLORS['treeview_complete_bg'], foreground=THEME_COLORS['treeview_complete_fg'])
         # Tag configurations moved to _update_treeview_theme() for theme consistency
 
     def _is_guest_fully_checked_in(self, guest, available_stations):
@@ -1197,19 +1354,18 @@ class NFCApp(ctk.CTk):
         # Status is already set by toggle_settings() - don't override it here
         # This prevents the "Ready" flash when opening settings
 
-        # Main container that fills and centers content
-        main_container = ctk.CTkFrame(self.content_frame, fg_color="transparent")
-        main_container.pack(fill="both", expand=True)
+        # Main container with theme-aware rounded background that fills the content area
+        bg_color = THEME_COLORS['content_frame_light'] if self.is_light_mode else THEME_COLORS['content_frame_dark']
+        main_container = ctk.CTkFrame(self.content_frame, fg_color=bg_color, corner_radius=15)
+        main_container.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # Center frame for all content
+        # Center frame for centering the buttons - transparent to show main_container background
         center_frame = ctk.CTkFrame(main_container, fg_color="transparent")
         center_frame.place(relx=0.5, rely=0.5, anchor="center")
 
-
-
         # Buttons container
         buttons_container = ctk.CTkFrame(center_frame, fg_color="transparent")
-        buttons_container.pack()
+        buttons_container.pack(padx=20, pady=20)
 
         # Tag Info button with frame for cancel button
         tag_info_frame = ctk.CTkFrame(buttons_container, fg_color="transparent")
@@ -1226,7 +1382,8 @@ class NFCApp(ctk.CTk):
             border_width=2,
             fg_color="transparent",
             text_color="#2196F3",
-            border_color="#2196F3"
+            border_color="#2196F3",
+            hover=False
         )
         
         # Add hover effects for Tag Info button
@@ -1251,7 +1408,8 @@ class NFCApp(ctk.CTk):
             border_width=2,
             fg_color="transparent",
             text_color="#ff9800",
-            border_color="#ff9800"
+            border_color="#ff9800",
+            hover=False
         )
         
         # Add hover effects for Rewrite Tag button (settings)
@@ -1410,8 +1568,11 @@ class NFCApp(ctk.CTk):
             self._cancel_settings_timer()  # Stop any ghost timers
             self._restart_settings_timer()  # Start fresh timer
             # Don't stop scanning when entering settings
-            # Show check-in service message when opening settings (all stations)
-            self.update_status(self.STATUS_READY_WAITING_FOR_CHECKIN, "normal")
+            # Show appropriate status - check NFC connection first
+            if not self.nfc_service.is_connected:
+                self.update_status(self.STATUS_NFC_NOT_CONNECTED, "error", auto_clear=False)
+            else:
+                self.update_status(self.STATUS_READY_WAITING_FOR_CHECKIN, "normal")
             self.update_mode_content()
         
         self.update_settings_button()
@@ -1508,7 +1669,7 @@ class NFCApp(ctk.CTk):
                 self.guest_list_visible = False
             # Manual check-in button is now in guest list panel
             # Expand content frame to cover most of screen (leave space for status bar)
-            self.content_frame.configure(height=600)
+            self.content_frame.configure(height=600, corner_radius=15)
             self.create_settings_content()
             return
         elif self.is_displaying_tag_info:
@@ -1518,12 +1679,12 @@ class NFCApp(ctk.CTk):
                 self.guest_list_visible = False
             # Manual check-in button is now in guest list panel
             # Expand content frame for tag info display
-            self.content_frame.configure(height=400)
+            self.content_frame.configure(height=400, corner_radius=15)
             self.create_tag_info_content()
             return
         else:
             # Restore compact content frame
-            self.content_frame.configure(height=200)
+            self.content_frame.configure(height=200, corner_radius=15)
             # Show guest list if not visible
             if not self.guest_list_visible:
                 self.list_frame.pack(fill="both", expand=True, pady=(10, 0))
@@ -1532,10 +1693,10 @@ class NFCApp(ctk.CTk):
             # Show buttons for all stations (in search bar area)
             if not self.is_rewrite_mode:
                 # Manual check-in button positioning (rightmost)
-                self.manual_checkin_btn.pack(side="right", padx=(10, 0))
+                self.manual_checkin_btn.pack(side="right", padx=(5, 0))
                 
-                # Station view toggle switch (to the left of manual check-in)
-                self.station_view_switch.pack(side="right", padx=(10, 5))
+                # Station view toggle switch container (to the left of manual check-in)
+                self.switch_container.pack(side="right", padx=(10, 0))
                 
                 # Update button text based on current manual check-in state
                 if self.checkin_buttons_visible:
@@ -1556,7 +1717,7 @@ class NFCApp(ctk.CTk):
                     )
             else:
                 # Hide buttons in rewrite mode
-                self.station_view_switch.pack_forget()
+                self.switch_container.pack_forget()
                 self.manual_checkin_btn.pack_forget()
 
         if self.is_rewrite_mode:
@@ -2852,7 +3013,7 @@ class NFCApp(ctk.CTk):
         else:
             self.update_status("Tag not registered", "warning")
 
-    def _get_stations_cached(self) -> List[str]:
+    def _get_stations_cached(self, fast_fail_startup=False) -> List[str]:
         """Get stations with GUI-level caching to minimize API calls."""
         import time
         current_time = time.time()
@@ -2866,7 +3027,7 @@ class NFCApp(ctk.CTk):
         # Get stations from service (which has its own caching)
         try:
             if hasattr(self, 'sheets_service') and self.sheets_service:
-                stations = self.sheets_service.get_available_stations()
+                stations = self.sheets_service.get_available_stations(fast_fail_startup)
                 self._gui_cached_stations = stations
                 self._station_cache_time = current_time
                 return stations
@@ -3532,6 +3693,10 @@ class NFCApp(ctk.CTk):
             self.clear_search()
             self.update_settings_button()
 
+        # Close manual check-in mode when switching stations
+        if self.checkin_buttons_visible:
+            self.toggle_manual_checkin()
+
         # Clear any stale _came_from_settings flag during station transitions
         if hasattr(self, '_came_from_settings'):
             delattr(self, '_came_from_settings')
@@ -3551,9 +3716,9 @@ class NFCApp(ctk.CTk):
         # Set checkpoint mode: Reception has it active, others don't
         self.is_checkpoint_mode = (station == "Reception")
 
-        # Update station toggle switch text if in single station mode
+        # Update station toggle label text if in single station mode
         if not self.show_all_stations:
-            self.station_view_switch.configure(text=f"{station} Only")
+            self.station_view_label.configure(text=f"{station} Only")
             # Update table structure to refresh column headers
             self._update_table_structure()
 
@@ -3699,8 +3864,8 @@ class NFCApp(ctk.CTk):
                 self.sheets_service.clear_station_cache()
                 self._gui_cached_stations = None
                 
-                # Get fresh dynamic stations
-                dynamic_stations = self._get_stations_cached()
+                # Get fresh dynamic stations with fast-fail to prevent startup hanging
+                dynamic_stations = self._get_stations_cached(fast_fail_startup=True)
                 
                 if dynamic_stations:
                     # Check if stations have changed
@@ -3743,6 +3908,8 @@ class NFCApp(ctk.CTk):
                 text_color="#6c757d",
                 border_color="#6c757d"
             )
+            # Set orange hover when entering manual check-in mode
+            self.guest_tree.tag_configure("checkin_hover", background=THEME_COLORS['treeview_hover_bg'], foreground=THEME_COLORS['treeview_hover_fg'])
         else:
             self.manual_checkin_btn.configure(
                 text="Manual Check-in",
@@ -3751,6 +3918,9 @@ class NFCApp(ctk.CTk):
                 text_color="#ff9800",
                 border_color="#ff9800"
             )
+            # Set light grey hover when returning to normal mode
+            normal_hover_bg = THEME_COLORS['treeview_normal_hover_light'] if self.is_light_mode else THEME_COLORS['treeview_normal_hover_dark']
+            self.guest_tree.tag_configure("checkin_hover", background=normal_hover_bg, foreground=THEME_COLORS['treeview_hover_fg'])
 
         # Refresh guest table to show/hide check-in buttons
         if self.guest_list_visible:
@@ -3761,18 +3931,23 @@ class NFCApp(ctk.CTk):
         # Get state from switch (True = All Stations, False = Single Station)
         self.show_all_stations = self.station_view_switch.get()
         
-        # Update switch text based on state
+        # Always close manual check-in mode when switching station views
+        if self.checkin_buttons_visible:
+            self.toggle_manual_checkin()
+        
+        # Update label text based on state
         if self.show_all_stations:
-            self.station_view_switch.configure(text="All Stations")
+            self.station_view_label.configure(text="All Stations")
         else:
-            self.station_view_switch.configure(text=f"{self.current_station} Only")
+            self.station_view_label.configure(text=f"{self.current_station} Only")
         
         # Update table structure (headers and columns)
         self._update_table_structure()
         
         # Refresh table to show/hide columns and update row coloring
+        # Use silent refresh to preserve local check-ins and avoid interfering with sync
         if self.guest_list_visible:
-            self._update_guest_table(self.guests_data)
+            self._update_guest_table_silent(self.guests_data)
 
     def _update_table_structure(self):
         """Update table columns and headers based on current station view."""
@@ -3807,10 +3982,10 @@ class NFCApp(ctk.CTk):
                     tree.heading(station_key, text=station, anchor="center")
                     tree.column(station_key, width=120, minwidth=80, anchor="center")
 
-    def _get_filtered_stations_for_view(self):
+    def _get_filtered_stations_for_view(self, fast_fail_startup=False):
         """Get stations list based on current view mode (all stations vs current station only)."""
         try:
-            all_stations = self._get_stations_cached()
+            all_stations = self._get_stations_cached(fast_fail_startup)
         except:
             all_stations = self.config['stations']
         
@@ -3997,19 +4172,21 @@ class NFCApp(ctk.CTk):
             
             item = self.guest_tree.insert("", "end", values=values, tags=tags)
 
-        # Ensure tags are configured after table rebuild (same as theme system)
+        # Ensure tags are configured after table rebuild (using THEME_COLORS constants)
         if self.is_light_mode:
-            odd_bg, even_bg = "#f8f9fa", "#ffffff"
-            text_color = "#212529"
+            odd_bg = THEME_COLORS['treeview_odd_row_light']
+            even_bg = THEME_COLORS['treeview_even_row_light']
+            text_color = THEME_COLORS['treeview_text_light']
         else:
-            odd_bg, even_bg = "#2b2b2b", "#353535"
-            text_color = "white"
+            odd_bg = THEME_COLORS['treeview_odd_row_dark']
+            even_bg = THEME_COLORS['treeview_even_row_dark']
+            text_color = THEME_COLORS['treeview_text_dark']
         
         self.guest_tree.tag_configure("odd", background=odd_bg, foreground=text_color)
         self.guest_tree.tag_configure("even", background=even_bg, foreground=text_color)
-        self.guest_tree.tag_configure("complete", background="#4CAF50", foreground="black")
+        self.guest_tree.tag_configure("complete", background=THEME_COLORS['treeview_complete_bg'], foreground=THEME_COLORS['treeview_complete_fg'])
         # ALWAYS force orange hover (works in both light/dark themes)
-        self.guest_tree.tag_configure("checkin_hover", background="#ff9800", foreground="black")
+        self.guest_tree.tag_configure("checkin_hover", background=THEME_COLORS['treeview_hover_bg'], foreground=THEME_COLORS['treeview_hover_fg'])
 
         # Sort by Last Name A-Ö permanently
         self._sort_by_lastname()
@@ -4238,8 +4415,11 @@ class NFCApp(ctk.CTk):
                     # Internet lost
                     self.sync_status_label.configure(text=self.SYNC_STATUS_NO_INTERNET, text_color="#f44336")
                 else:
-                    # Internet restored - check Google Sheets
+                    # Internet restored - check Google Sheets and refresh data
+                    self.logger.info("Internet connection restored - triggering data refresh")
                     self._update_sheets_connection_status()
+                    # Trigger refresh like Cmd+R to sync any changes that occurred while offline
+                    self.refresh_guest_data()
                     
         except Exception as e:
             # Don't log errors to avoid spam
@@ -4296,8 +4476,8 @@ class NFCApp(ctk.CTk):
             ctk.set_appearance_mode("light")
             self.theme_btn.configure(
                 text="Dark Mode",
-                text_color="#404040",  # Dark grey - switch to dark mode
-                border_color="#404040"
+                text_color=THEME_COLORS['theme_light_text'],
+                border_color=THEME_COLORS['theme_light_text']
             )
             self.logger.info("Switched to light mode")
         else:
@@ -4305,10 +4485,13 @@ class NFCApp(ctk.CTk):
             ctk.set_appearance_mode("dark")
             self.theme_btn.configure(
                 text="Light Mode",
-                text_color="#e0e0e0",  # Light grey - switch to light mode
-                border_color="#e0e0e0"
+                text_color=THEME_COLORS['theme_dark_text'],
+                border_color=THEME_COLORS['theme_dark_text']
             )
             self.logger.info("Switched to dark mode")
+        
+        # Update all frame backgrounds for new theme
+        self._update_all_frame_backgrounds()
         
         # Save theme preference
         self._save_theme_preference()
@@ -4318,6 +4501,10 @@ class NFCApp(ctk.CTk):
         
         # Update TreeView colors for the new theme
         self._update_treeview_theme()
+        
+        # If in settings mode, refresh settings content to apply new theme
+        if self.settings_visible:
+            self.update_mode_content()
 
     def _save_theme_preference(self):
         """Save theme preference to config."""
@@ -4355,25 +4542,25 @@ class NFCApp(ctk.CTk):
         style.theme_use("clam")  # Ensure the clam theme is active
 
         if self.is_light_mode:
-            # --- Light Mode Colors ---
-            tree_bg = "#ffffff"
-            text_color = "#212529"
-            heading_bg = "#e9ecef"
-            odd_row_bg = "#f8f9fa"
-            even_row_bg = "#ffffff"
-            summary_bg = "#e9ecef"
-            selected_bg = "#cce5ff"  # A light blue for selection
-            selected_fg = "#004085"
+            # --- Light Mode Colors (from THEME_COLORS constants) ---
+            tree_bg = THEME_COLORS['treeview_bg_light']
+            text_color = THEME_COLORS['treeview_text_light']
+            heading_bg = THEME_COLORS['treeview_heading_light']
+            odd_row_bg = THEME_COLORS['treeview_odd_row_light']
+            even_row_bg = THEME_COLORS['treeview_even_row_light']
+            summary_bg = THEME_COLORS['treeview_summary_light']
+            selected_bg = THEME_COLORS['treeview_selected_bg_light']
+            selected_fg = THEME_COLORS['treeview_selected_fg_light']
         else:
-            # --- Dark Mode Colors ---
-            tree_bg = "#212121"
-            text_color = "white"
-            heading_bg = "#2b2b2b"
-            odd_row_bg = "#2b2b2b"
-            even_row_bg = "#353535"
-            summary_bg = "#323232"
-            selected_bg = "#4a4a4a"  # Original dark selection
-            selected_fg = "white"
+            # --- Dark Mode Colors (from THEME_COLORS constants) ---
+            tree_bg = THEME_COLORS['treeview_bg_dark']
+            text_color = THEME_COLORS['treeview_text_dark']
+            heading_bg = THEME_COLORS['treeview_heading_dark']
+            odd_row_bg = THEME_COLORS['treeview_odd_row_dark']
+            even_row_bg = THEME_COLORS['treeview_even_row_dark']
+            summary_bg = THEME_COLORS['treeview_summary_dark']
+            selected_bg = THEME_COLORS['treeview_selected_bg_dark']
+            selected_fg = THEME_COLORS['treeview_selected_fg_dark']
 
         # 1. Configure the BASE style for the Treeview widget
         style.configure("Treeview",
@@ -4392,22 +4579,34 @@ class NFCApp(ctk.CTk):
                         borderwidth=0,
                         relief="flat",
                         font=("TkFixedFont", 13, "bold"))
+        
+        # 2b. Disable hover effects for headers
+        style.map("Treeview.Heading",
+                  background=[('active', heading_bg)],  # Same color on hover
+                  foreground=[('active', text_color)])  # Same text color on hover
 
-        # 3. Configure ONLY the selection colors (hover is handled by custom tag system)
+        # 3. Make selection invisible by using normal row colors
         style.map('Treeview',
                   background=[
-                      ('selected', selected_bg)
+                      ('selected', tree_bg)  # Same as normal background
                   ],
                   foreground=[
-                      ('selected', selected_fg)
+                      ('selected', text_color)  # Same as normal text
                   ])
 
         # 4. Configure the tags for alternating row colors and summary
         self.guest_tree.tag_configure("odd", background=odd_row_bg, foreground=text_color)
         self.guest_tree.tag_configure("even", background=even_row_bg, foreground=text_color)
-        self.guest_tree.tag_configure("complete", background="#4CAF50", foreground="black")
-        # ALWAYS force orange hover (works in both light/dark themes)
-        self.guest_tree.tag_configure("checkin_hover", background="#ff9800", foreground="black")
+        self.guest_tree.tag_configure("complete", background=THEME_COLORS['treeview_complete_bg'], foreground=THEME_COLORS['treeview_complete_fg'])
+        
+        # Configure hover tag based on current manual check-in mode
+        if hasattr(self, 'checkin_buttons_visible') and self.checkin_buttons_visible:
+            # Orange hover when manual check-in mode is active
+            self.guest_tree.tag_configure("checkin_hover", background=THEME_COLORS['treeview_hover_bg'], foreground=THEME_COLORS['treeview_hover_fg'])
+        else:
+            # Light grey hover when in normal mode
+            normal_hover_bg = THEME_COLORS['treeview_normal_hover_light'] if self.is_light_mode else THEME_COLORS['treeview_normal_hover_dark']
+            self.guest_tree.tag_configure("checkin_hover", background=normal_hover_bg, foreground=text_color)
 
         # 5. Apply the same base styling to the summary tree (if it exists)
         if hasattr(self, 'summary_tree'):
@@ -4449,15 +4648,11 @@ class NFCApp(ctk.CTk):
                 self.update_status("Refresh already in progress", "warning")
             return
             
-        # Force fresh internet check instead of relying on cached status
+        # Update internet connection status
+        self._internet_connected = internet_check
         if not internet_check:
-            self.logger.info(f"Refresh blocked - no internet connection detected (user_initiated: {user_initiated})")
+            self.logger.info(f"No internet connection detected - will attempt to use cached data (user_initiated: {user_initiated})")
             self.sync_status_label.configure(text=self.SYNC_STATUS_NO_INTERNET, text_color="#f44336")
-            self._internet_connected = False  # Update cached status
-            if user_initiated:
-                self.update_status("Refresh not available - no internet connection", "error")
-            self._sheets_refresh_lock.release()
-            return
 
         # Show status message only for user-initiated refreshes
         if user_initiated:
@@ -4476,22 +4671,29 @@ class NFCApp(ctk.CTk):
     def _refresh_guest_data_thread(self):
         """Thread function for refreshing data."""
         try:
-            # Simple check: if no internet, use cached data
-            if not self._internet_connected:
-                self.after(0, self._update_guest_table, self.guests_data)
-                if hasattr(self, '_is_user_initiated_refresh') and self._is_user_initiated_refresh:
-                    self.after(0, self.update_status, "No internet connection", "error")
-                return
-                
+            # Always try to get guests - the sheets service will return cached data if offline
+            self.logger.info(f"Attempting to get guests. Internet connected: {self._internet_connected}")
             guests = self.sheets_service.get_all_guests()
+            self.logger.info(f"Retrieved {len(guests)} guests from sheets service")
+            
+            # Show offline message if no internet and user initiated
+            if not self._internet_connected and hasattr(self, '_is_user_initiated_refresh') and self._is_user_initiated_refresh:
+                self.after(0, self.update_status, "No internet connection - using cached data", "warning")
+                
             # Resolve any sync conflicts (local data vs Google Sheets)
             self.tag_manager.resolve_sync_conflicts(guests)
             # Always update table even if empty to show local data
             self.after(0, self._update_guest_table, guests)
         except Exception as e:
             self.logger.error(f"Failed to fetch from Google Sheets: {e}")
-            # Still update table with existing data to show local check-ins
-            self.after(0, self._update_guest_table, self.guests_data)
+            # Try to get cached data from sheets service as fallback
+            try:
+                cached_guests = getattr(self.sheets_service, '_cached_guests', [])
+                self.logger.info(f"Using fallback cached data: {len(cached_guests)} guests")
+                self.after(0, self._update_guest_table, cached_guests)
+            except:
+                # Final fallback to existing app data
+                self.after(0, self._update_guest_table, self.guests_data)
             # Only show cached data message for user-initiated refreshes, not automatic ones
             if hasattr(self, '_is_user_initiated_refresh') and self._is_user_initiated_refresh:
                 self.after(0, self.update_sync_status, "Using cached data (Google Sheets offline)", "warning")
@@ -4598,19 +4800,21 @@ class NFCApp(ctk.CTk):
             self.logger.warning(f"Found {len(discrepancies)} sync discrepancies, re-syncing...")
             self._handle_sync_discrepancies(discrepancies)
 
-        # Ensure tags are configured after table rebuild (same as theme system)
+        # Ensure tags are configured after table rebuild (using THEME_COLORS constants)
         if self.is_light_mode:
-            odd_bg, even_bg = "#f8f9fa", "#ffffff"
-            text_color = "#212529"
+            odd_bg = THEME_COLORS['treeview_odd_row_light']
+            even_bg = THEME_COLORS['treeview_even_row_light']
+            text_color = THEME_COLORS['treeview_text_light']
         else:
-            odd_bg, even_bg = "#2b2b2b", "#353535"
-            text_color = "white"
+            odd_bg = THEME_COLORS['treeview_odd_row_dark']
+            even_bg = THEME_COLORS['treeview_even_row_dark']
+            text_color = THEME_COLORS['treeview_text_dark']
         
         self.guest_tree.tag_configure("odd", background=odd_bg, foreground=text_color)
         self.guest_tree.tag_configure("even", background=even_bg, foreground=text_color)
-        self.guest_tree.tag_configure("complete", background="#4CAF50", foreground="black")
+        self.guest_tree.tag_configure("complete", background=THEME_COLORS['treeview_complete_bg'], foreground=THEME_COLORS['treeview_complete_fg'])
         # ALWAYS force orange hover (works in both light/dark themes)
-        self.guest_tree.tag_configure("checkin_hover", background="#ff9800", foreground="black")
+        self.guest_tree.tag_configure("checkin_hover", background=THEME_COLORS['treeview_hover_bg'], foreground=THEME_COLORS['treeview_hover_fg'])
 
         # Sort by Last Name A-Ö permanently
         self._sort_by_lastname()
@@ -4624,8 +4828,8 @@ class NFCApp(ctk.CTk):
             self.logger.info(f"Found {registry_stats['pending_syncs']} pending syncs at startup - forcing sync")
             self.after(1000, self._force_sync_on_startup)
 
-        # Only show "Loaded X guests" message at startup
-        if not hasattr(self, '_initial_load_complete'):
+        # Only show "Loaded X guests" message at startup and only if we have actual data
+        if not hasattr(self, '_initial_load_complete') and len(guests) > 0:
             self.update_status(f"Loaded {len(guests)} guests", "success")
             # Fade to appropriate status after 2 seconds
             if self.is_rewrite_mode:
@@ -4800,7 +5004,7 @@ class NFCApp(ctk.CTk):
         
         # If clicking on ID, First Name, or Last Name columns, treat as guest selection
         if col_num < 3:
-            self.on_guest_select(event)
+            self.on_guest_select_direct(item)
             return
         
         # For station columns, enable editing
@@ -4978,6 +5182,27 @@ class NFCApp(ctk.CTk):
         if selection:
             item = self.guest_tree.item(selection[0])
             guest_id = item['values'][0]
+
+            if self.is_registration_mode:
+                # Fill registration form
+                self.id_entry.delete(0, 'end')
+                self.id_entry.insert(0, str(guest_id))
+                # Start 15-second auto-clear timer
+                self._start_id_clear_timer()
+            elif self.is_rewrite_mode:
+                # Fill rewrite form
+                self.rewrite_id_entry.delete(0, 'end')
+                self.rewrite_id_entry.insert(0, str(guest_id))
+            elif self.checkin_buttons_visible:
+                # Fill manual check-in form
+                self.manual_id_entry.delete(0, 'end')
+                self.manual_id_entry.insert(0, str(guest_id))
+
+    def on_guest_select_direct(self, item):
+        """Handle guest selection directly from item (without selection)."""
+        if item:
+            item_data = self.guest_tree.item(item)
+            guest_id = item_data['values'][0]
 
             if self.is_registration_mode:
                 # Fill registration form
@@ -5379,21 +5604,33 @@ class NFCApp(ctk.CTk):
         self._nfc_operation_lock = False
 
     def on_tree_motion(self, event):
-        """Handle mouse motion over tree for cursor changes and hover styling."""
+        """Handle mouse motion over tree for cursor changes, hover styling, and phone tooltips."""
+        
+        # Check if mouse is over header area - if so, skip all hover effects
+        region = self.guest_tree.identify("region", event.x, event.y)
+        if region == "heading":
+            # Clear any existing hover and tooltip when over headers
+            self._clear_tooltip()
+            if self.hovered_item:
+                try:
+                    current_tags = list(self.guest_tree.item(self.hovered_item, "tags"))
+                    if "checkin_hover" in current_tags:
+                        current_tags.remove("checkin_hover")
+                        self.guest_tree.item(self.hovered_item, tags=current_tags)
+                except tk.TclError:
+                    pass
+                self.hovered_item = None
+            return
+        
         # Get the item and column under mouse
         item = self.guest_tree.identify("item", event.x, event.y)
         column = self.guest_tree.identify("column", event.x, event.y)
 
-        # Clear previous hover styling
-        if self.hovered_item:
-            current_tags = list(self.guest_tree.item(self.hovered_item, "tags"))
-            if "checkin_hover" in current_tags:
-                current_tags.remove("checkin_hover")
-                self.guest_tree.item(self.hovered_item, tags=current_tags)
-            self.hovered_item = None
+        # Handle tooltip logic first
+        self._handle_tooltip_motion(item, column, event.x, event.y)
 
-        # Check if hovering over check-in button in any station column
-        if item and column:
+        # Check if hovering over check-in button in any station column (manual check-in mode)
+        if self.checkin_buttons_visible and item and column:
             column_index = int(column.replace('#', '')) - 1
             # Station columns start at index 3 (after id, first, last)
             # Get dynamic stations for current view
@@ -5405,18 +5642,258 @@ class NFCApp(ctk.CTk):
             if column_index >= 3 and column_index < 3 + len(available_stations):
                 values = self.guest_tree.item(item, "values")
                 if len(values) > column_index and values[column_index] == "Check-in":
-                    # Apply hover styling
+                    # Clear previous hover
+                    if self.hovered_item:
+                        try:
+                            current_tags = list(self.guest_tree.item(self.hovered_item, "tags"))
+                            if "checkin_hover" in current_tags:
+                                current_tags.remove("checkin_hover")
+                                self.guest_tree.item(self.hovered_item, tags=current_tags)
+                        except tk.TclError:
+                            pass
+                    
+                    # Apply hover styling to check-in button
                     current_tags = list(self.guest_tree.item(item, "tags"))
-                    current_tags.append("checkin_hover")
-                    self.guest_tree.item(item, tags=current_tags)
+                    if "checkin_hover" not in current_tags:
+                        current_tags.append("checkin_hover")
+                        self.guest_tree.item(item, tags=current_tags)
                     self.hovered_item = item
 
                     # Set hand cursor
                     self.guest_tree.configure(cursor="hand2")
                     return
-
+        
+        # For all other cases (normal mode or not over check-in button), use the streamlined hover
+        self._update_hover(event)
+        
         # Reset cursor
         self.guest_tree.configure(cursor="")
+
+    def on_tree_leave(self, event):
+        """Clear hover effect when the mouse leaves the Treeview."""
+        self._clear_tooltip()
+        
+        # Clear hover styling when mouse leaves tree
+        if self.hovered_item:
+            try:
+                current_tags = list(self.guest_tree.item(self.hovered_item, "tags"))
+                if "checkin_hover" in current_tags:
+                    current_tags.remove("checkin_hover")
+                    self.guest_tree.item(self.hovered_item, tags=current_tags)
+            except tk.TclError:
+                pass  # Item was already removed
+            self.hovered_item = None
+
+    def _update_hover(self, event):
+        """A single method to handle all hover effect updates."""
+        # Check if mouse is over header area - if so, don't apply hover
+        region = self.guest_tree.identify("region", event.x, event.y)
+        if region == "heading":
+            # Mouse is over header, don't apply hover effects
+            if self.hovered_item:
+                # Clear any existing hover
+                try:
+                    current_tags = list(self.guest_tree.item(self.hovered_item, "tags"))
+                    if "checkin_hover" in current_tags:
+                        current_tags.remove("checkin_hover")
+                        self.guest_tree.item(self.hovered_item, tags=current_tags)
+                except tk.TclError:
+                    pass
+                self.hovered_item = None
+            return
+        
+        # Get the item under the cursor with more precise detection
+        item = self._get_precise_item_at_cursor(event.y)
+
+        # If the hovered item has changed since the last event, update the styling
+        if item != self.hovered_item:
+            # First, remove the hover tag from the previously hovered item (if any)
+            if self.hovered_item:
+                try:
+                    current_tags = list(self.guest_tree.item(self.hovered_item, "tags"))
+                    if "checkin_hover" in current_tags:
+                        current_tags.remove("checkin_hover")
+                        self.guest_tree.item(self.hovered_item, tags=current_tags)
+                except tk.TclError:
+                    # This can happen if a refresh occurs while hovered
+                    pass
+
+            # Now, apply the hover tag to the new item
+            if item:
+                # In normal mode, apply hover to any row
+                # In manual check-in mode, the motion handler handles button-specific hover
+                if not self.checkin_buttons_visible:
+                    current_tags = list(self.guest_tree.item(item, "tags"))
+                    if "checkin_hover" not in current_tags:
+                        current_tags.append("checkin_hover")
+                        self.guest_tree.item(item, tags=current_tags)
+
+            # Update the reference to the currently hovered item
+            self.hovered_item = item
+
+    def _get_precise_item_at_cursor(self, y):
+        """Get the item under the cursor with precise boundary checking."""
+        # First, try the standard identify_row
+        item = self.guest_tree.identify_row(y)
+        
+        if item:
+            try:
+                # Get the item's bounding box to verify cursor is actually within it
+                bbox = self.guest_tree.bbox(item)
+                if bbox:  # bbox returns (x, y, width, height)
+                    item_top = bbox[1]
+                    item_bottom = bbox[1] + bbox[3]
+                    
+                    # Check if cursor Y is actually within this item's visual bounds
+                    if item_top <= y <= item_bottom:
+                        return item
+                    
+                    # If cursor is in the gap between rows, find the closest row
+                    item_center = item_top + (bbox[3] / 2)
+                    if y < item_center:
+                        # Cursor is in upper half of row or gap above
+                        # Check if there's a row above
+                        prev_item = self.guest_tree.prev(item)
+                        if prev_item:
+                            prev_bbox = self.guest_tree.bbox(prev_item)
+                            if prev_bbox:
+                                prev_bottom = prev_bbox[1] + prev_bbox[3]
+                                # If cursor is closer to previous row, use that
+                                if abs(y - prev_bottom) < abs(y - item_top):
+                                    return prev_item
+                        return item if y > item_top - 5 else None  # Small tolerance
+                    else:
+                        # Cursor is in lower half or gap below
+                        return item if y < item_bottom + 5 else None  # Small tolerance
+            except:
+                # If bbox fails, fall back to standard detection
+                pass
+        
+        return item
+
+    def _on_scroll(self, event):
+        """Handle scroll events by updating hover at current mouse position."""
+        try:
+            # Clear any pending tooltip first since content has moved under mouse
+            self._clear_tooltip()
+            
+            # Get the current mouse position relative to the TreeView widget
+            # We need to convert from screen coordinates to widget coordinates
+            mouse_x = self.guest_tree.winfo_pointerx() - self.guest_tree.winfo_rootx()
+            mouse_y = self.guest_tree.winfo_pointery() - self.guest_tree.winfo_rooty()
+            
+            # Check if mouse is actually over the TreeView
+            if (0 <= mouse_x <= self.guest_tree.winfo_width() and 
+                0 <= mouse_y <= self.guest_tree.winfo_height()):
+                
+                # Create a synthetic event with the current mouse position
+                class SyntheticEvent:
+                    def __init__(self, x, y):
+                        self.x = x
+                        self.y = y
+                
+                synthetic_event = SyntheticEvent(mouse_x, mouse_y)
+                self._update_hover(synthetic_event)
+                
+                # Also re-evaluate tooltip for the new position after scroll
+                item = self.guest_tree.identify("item", mouse_x, mouse_y)
+                column = self.guest_tree.identify("column", mouse_x, mouse_y)
+                self._handle_tooltip_motion(item, column, mouse_x, mouse_y)
+        except Exception as e:
+            # Silently handle any coordinate calculation errors
+            pass
+
+    def _handle_tooltip_motion(self, item, column, x, y):
+        """Handle tooltip logic during mouse motion."""
+        # Skip if no item
+        if not item:
+            self._clear_tooltip()
+            return
+            
+        # Check if we're hovering over the same item and column
+        if item == self._tooltip_item and column == self._tooltip_column:
+            return  # Already processing this tooltip
+            
+        # Clear existing tooltip and timer
+        self._clear_tooltip()
+        
+        # Start new tooltip timer for 2-second delay
+        self._tooltip_item = item
+        self._tooltip_column = column
+        self._tooltip_timer = self.after(2000, lambda: self._show_phone_tooltip(item, x, y))
+
+    def _clear_tooltip(self):
+        """Clear any active tooltip timer or window."""
+        if self._tooltip_timer:
+            self.after_cancel(self._tooltip_timer)
+            self._tooltip_timer = None
+            
+        if self._tooltip_window:
+            self._tooltip_window.destroy()
+            self._tooltip_window = None
+            
+        self._tooltip_item = None
+        self._tooltip_column = None
+
+    def _show_phone_tooltip(self, item, x, y):
+        """Show phone number tooltip for the given item."""
+        try:
+            values = self.guest_tree.item(item, "values")
+            if not values or len(values) < 3:
+                return
+                
+            guest_id = int(values[0])
+            
+            # Find the guest in our data
+            guest = None
+            if hasattr(self, 'guests_data'):
+                for g in self.guests_data:
+                    if g.original_id == guest_id:
+                        guest = g
+                        break
+                        
+            if not guest:
+                return
+                
+            # Get formatted phone number
+            phone_text = guest.get_formatted_phone()
+            
+            # Create tooltip window
+            self._tooltip_window = tk.Toplevel(self)
+            self._tooltip_window.wm_overrideredirect(True)
+            self._tooltip_window.wm_attributes("-topmost", True)
+            
+            # Position tooltip near mouse cursor (using TreeView's position)
+            tree_x = self.guest_tree.winfo_rootx()
+            tree_y = self.guest_tree.winfo_rooty()
+            tooltip_x = tree_x + x + 10
+            tooltip_y = tree_y + y + 10
+            self._tooltip_window.wm_geometry(f"+{tooltip_x}+{tooltip_y}")
+            
+            # Create tooltip label with theme-appropriate styling
+            if hasattr(self, 'current_theme') and self.current_theme == 'dark':
+                bg_color = "#2b2b2b"
+                fg_color = "#ffffff"
+            else:
+                bg_color = "#f8f9fa"
+                fg_color = "#212121"
+            
+            label = tk.Label(
+                self._tooltip_window,
+                text=phone_text,
+                background=bg_color,
+                foreground=fg_color,
+                relief="flat",
+                borderwidth=0,
+                font=("Arial", 30),
+                padx=12,
+                pady=6
+            )
+            label.pack()
+            
+        except Exception as e:
+            self.logger.debug(f"Error showing phone tooltip: {e}")
+            self._clear_tooltip()
 
     def on_tree_click(self, event):
         """Handle click on tree for check-in button and closing edit."""
@@ -5546,6 +6023,20 @@ class NFCApp(ctk.CTk):
 
     def update_status(self, message: str, status_type: str = "normal", auto_clear: bool = True):
         """Update status bar."""
+        # Stop any existing NFC blinking
+        if hasattr(self, '_nfc_blink_job') and self._nfc_blink_job is not None:
+            try:
+                self.after_cancel(self._nfc_blink_job)
+            except ValueError:
+                # Timer already expired or invalid
+                pass
+            self._nfc_blink_job = None
+            
+        # Check if this is the NFC not connected message
+        if message == self.STATUS_NFC_NOT_CONNECTED:
+            self._start_nfc_blink(message, status_type)
+            return
+            
         # Theme-aware color mapping
         if self.is_light_mode:
             color_map = {
@@ -5573,6 +6064,42 @@ class NFCApp(ctk.CTk):
         # Auto-clear all messages after 2 seconds (except empty messages)
         if auto_clear and message and message.strip():
             self.after(2000, lambda: self._auto_clear_status(message))
+
+    def _start_nfc_blink(self, message: str, status_type: str):
+        """Start blinking animation for NFC not connected status."""
+        # Get the error color for when text is visible
+        if self.is_light_mode:
+            error_color = "#f44336"
+        else:
+            error_color = "#f44336"
+            
+        self._nfc_blink_state = True  # True = show text, False = hide text
+        self._nfc_blink_message = message
+        self._nfc_error_color = error_color
+        self._do_nfc_blink()
+    
+    def _do_nfc_blink(self):
+        """Perform one blink cycle."""
+        if not hasattr(self, '_nfc_blink_message'):
+            return
+            
+        if self._nfc_blink_state:
+            # Show the full message with error color
+            self.safe_update_widget(
+                'status_label',
+                lambda w, text, tc: w.configure(text=text, text_color=tc),
+                self._nfc_blink_message, self._nfc_error_color
+            )
+        else:
+            # Hide the text completely (empty string)
+            self.safe_update_widget(
+                'status_label',
+                lambda w: w.configure(text=""),
+            )
+        
+        # Toggle state and schedule next blink
+        self._nfc_blink_state = not self._nfc_blink_state
+        self._nfc_blink_job = self.after(800, self._do_nfc_blink)  # Blink every 800ms
 
     def _auto_clear_status(self, original_message: str):
         """Auto-clear status if it hasn't changed."""
@@ -5614,10 +6141,23 @@ class NFCApp(ctk.CTk):
             self.logger.error(f"Failed to load logo: {e}")
 
     def on_logo_click(self, event):
-        """Easter egg: spin the logo when clicked."""
-        # Only allow clicking when not spinning and cooldown period has passed
+        """Easter egg: spin the logo when clicked, then refresh data."""
+        # Check cooldowns - only allow if not spinning and refresh cooldown has passed
+        current_time = time.time()
+        
+        # Check refresh cooldown (3 seconds)
+        if hasattr(self, '_logo_refresh_last_time'):
+            if current_time - self._logo_refresh_last_time < 3.0:
+                return  # Still in cooldown
+        
+        # Only allow clicking when not spinning
         if not hasattr(self, 'logo_spinning') or not self.logo_spinning:
+            # Start spin animation
             self.spin_logo()
+            # Trigger refresh after animation completes (1000ms + 100ms buffer)
+            self.after(1100, lambda: self.refresh_guest_data(user_initiated=True))
+            # Set refresh cooldown
+            self._logo_refresh_last_time = current_time
 
     def spin_logo(self):
         """Animate the logo with a smooth spin effect."""
@@ -5625,8 +6165,8 @@ class NFCApp(ctk.CTk):
             return
             
         self.logo_spinning = True
-        duration_ms = 800  # Total animation time
-        total_frames = 40   # Smooth animation
+        duration_ms = 1000  # Total animation time
+        total_frames = 30   # Smooth animation with better timing
         degrees_per_frame = 360 / total_frames
         
         def animate_frame(frame):
@@ -5663,6 +6203,9 @@ class NFCApp(ctk.CTk):
 
     def on_escape_key(self, event):
         """Handle ESC key to close dialogs following state management patterns."""
+        
+        # Always clear tooltips when ESC is pressed
+        self._clear_tooltip()
         
         # Check current dialog state and call appropriate close function
         

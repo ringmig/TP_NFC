@@ -39,25 +39,30 @@
 ## Step 4: Spreadsheet Format
 
 Your Google Sheet should have these columns:
-- **A**: originalid (number)
-- **B**: firstname (text)
-- **C**: lastname (text)
-- **D**: reception (check-in time or X)
-- **E**: lio (check-in time or X)
-- **F**: juntos (check-in time or X)
-- **G**: experimental (check-in time or X)
-- **H**: unvrs (check-in time or X)
 
-Example:
+| Column | Header | Description |
+|--------|--------|-------------|
+| A | originalid | Unique guest ID (number) |
+| B | firstname | Guest's first name |
+| C | lastname | Guest's last name |
+| D | mobilenumber | Phone number (optional) |
+| E+ | station_name | Check-in columns (e.g., reception, lio, juntos) |
+
+**Example:**
 ```
-originalid | firstname | lastname | reception | lio | juntos | experimental | unvrs
-1001       | John      | Doe      |           |     |        |              |
-1002       | Jane      | Smith    |           |     |        |              |
+originalid | firstname | lastname | mobilenumber | reception | lio | juntos
+1001       | John      | Doe      | +1234567890  |           |     |
+1002       | Jane      | Smith    | +0987654321  |           |     |
 ```
+
+**Notes:**
+- Station columns are auto-detected from headers
+- Mobile number column is optional but enables phone tooltips
+- Check-in values can be timestamps or simple "X" marks
 
 ## Step 5: Test Connection
 
-Run: `test_sheets.bat`
+Run: `tools/test_sheets.command`
 
 On first run, it will:
 1. Open your browser for Google authentication

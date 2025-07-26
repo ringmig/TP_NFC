@@ -2,6 +2,63 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## STRICT OPERATIONAL PROTOCOL:
+
+**BOOTSTRAP SEQUENCE:**
+   - First: Read CLAUDE.md to load project context and previous session state
+   - Second: Review any files mentioned in CLAUDE.md before proceeding
+   
+
+**STATE SYNCHRONIZATION:**
+   - After code changes: Update relevant tracking files
+     - Improvements.yaml: Remove completed items, add discovered issues and planned features
+     - State_Structure.yaml: Document new patterns or state changes
+     - PROJECT_STATUS.md: Update feature completion status
+   - Keep updates concise but complete
+
+**BOOTSTRAP HANDOFF:**
+   - Final CLAUDE.md must enable next session to continue seamlessly
+   - Include specific method names, line numbers, and error states
+   - Document any locks, flags, or states that were in progress
+   - Prioritize "what was I doing" over "what I did"
+
+## Project Context
+**Project:** TP_NFC - NFC attendance tracking system with GUI  
+**Location:** `/Users/howard/Documents/GitHub/TP_NFC/`  
+**Key Files:** To read before attempting to implement improvements!
+- `README.md` - Comprehensive project documentation with setup, configuration, architecture, and development guidelines
+- `src/gui/app.py` - Main GUI application (4200+ lines, CustomTkinter)
+
+## Current Session Summary (Recent UI Improvements & Bug Fixes)
+
+### ✅ Completed This Session:
+
+**11. Offline Data Caching & Auto-Refresh** (FULLY WORKING ✅):
+- **Cached Guest Data Loading**: Fixed offline mode to properly load and display cached guest data
+- **Bug Fix**: Removed internet connectivity blocking that prevented cached data access  
+- **Auto-Refresh on Connection Restore**: Automatically triggers `refresh_guest_data()` when internet is restored
+- **Status Message Fix**: Corrected "Loaded 0 guests" message showing when data loads successfully
+- **Background Monitoring**: 10-second internet connectivity checks with automatic data sync
+
+**12. Non-Interactive UI Elements** (FULLY WORKING ✅):
+- **Summary Row**: Made completely non-clickable and removed all hover effects
+- **TreeView Headers**: Removed hover color changes using ttk.Style mapping  
+- **Header Detection**: Added region detection to prevent hover effects on column headers
+- **Tooltip Timer Fix**: Proper tooltip timer cancellation during scrolling events
+- **Scroll-Safe Tooltips**: Re-evaluate tooltip position after scroll to prevent wrong-cell tooltips
+
+**Key Technical Solutions**:
+- **Caching Fix**: Removed early return blocking to allow sheets service to handle offline scenarios
+- **Style Mapping**: Used `style.map("Treeview.Heading", background=[('active', heading_bg)])` to disable header hover
+- **Timer Management**: Added `_clear_tooltip()` to scroll handlers for proper tooltip lifecycle
+
+### Previous Major Achievements:
+- Complete modern button design system with outline + hover fill pattern
+- Light/dark theme toggle with full TreeView theming
+- Row hover system with selection elimination  
+- NFC status blinking alerts
+- Comprehensive bug fixes for button states and dialog interactions
+
 ## Project Overview
 
 TP_NFC is an NFC-based attendance tracking system for event management. It tracks guest attendance at multiple stations using NFC wristbands and synchronizes data with Google Sheets.
@@ -106,11 +163,6 @@ git add . && git commit -m "Update Android app" && git push origin master
 - No automated GUI testing currently implemented
 
 ## Known Issues and Improvements
-
-See `Improvements.yaml` for detailed improvement plan focusing on:
-- State management refactoring
-- Resource cleanup improvements
-- Performance optimizations
-- Error handling enhancements
+-
 
 The project is actively being stabilized with focus on reliability for live event usage.
