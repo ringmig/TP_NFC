@@ -36,6 +36,7 @@ class PyscardNFCService:
         self.reader = None
         self.connection = None
         self.is_connected = False
+        self.last_error_type = None  # Track last error: 'timeout', 'connection_failed', 'read_failed'
         
     def connect(self) -> bool:
         """
@@ -110,6 +111,7 @@ class PyscardNFCService:
                     cardservice.connection.connect()
                 except Exception as connect_error:
                     if "unresponsive" in str(connect_error).lower() or "T0 or T1" in str(connect_error):
+                        self.last_error_type = 'connection_failed'
                         if attempt < max_retries:
                             self.logger.warning(f"Card connection failed (attempt {attempt + 1}): {connect_error}")
                             continue
@@ -128,6 +130,9 @@ class PyscardNFCService:
                     uid = toHexString(response).replace(' ', '')
                     self.logger.debug(f"Tag detected with UID: {uid}")  # Reduced to debug level
                     
+                    # Clear any previous error
+                    self.last_error_type = None
+                    
                     # Create NFCTag instance
                     tag = NFCTag(uid)
                     
@@ -136,6 +141,7 @@ class PyscardNFCService:
                     
                     return tag
                 else:
+                    self.last_error_type = 'read_failed'
                     self.logger.error(f"Failed to read UID: SW1={sw1:02X} SW2={sw2:02X}")
                     return None
                     
@@ -146,12 +152,16 @@ class PyscardNFCService:
                 else:
                     # Final attempt or different error type
                     if "timeout" in str(e).lower():
+                        self.last_error_type = 'timeout'
                         self.logger.debug("No tag detected within timeout period")
                     else:
+                        self.last_error_type = 'read_failed'
                         self.logger.error(f"Error reading NFC tag: {e}")
                     return None
         
         # If we get here, all retries failed
+        if self.last_error_type is None:
+            self.last_error_type = 'connection_failed'
         self.logger.error("All retry attempts failed")
         return None
             
@@ -171,6 +181,15 @@ class PyscardNFCService:
         thread = Thread(target=_read)
         thread.daemon = True
         thread.start()
+    
+    def get_last_error_type(self) -> Optional[str]:
+        """
+        Get the type of the last error that occurred.
+        
+        Returns:
+            str: 'timeout', 'connection_failed', 'read_failed', or None if no error
+        """
+        return self.last_error_type
         
     def check_connection(self) -> bool:
         """

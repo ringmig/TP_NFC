@@ -195,8 +195,9 @@ class CheckInQueue:
             try:
                 # Check if Google Sheets already has data (manual edit)
                 guest = self.sheets_service.find_guest_by_id(check_in['original_id'])
-                if guest and guest.get_check_in_time(check_in['station'].lower()):
-                    # Google Sheets already has data - remove from queue and local cache
+                existing_time = guest.get_check_in_time(check_in['station'].lower()) if guest else None
+                if guest and existing_time and str(existing_time).strip():
+                    # Google Sheets already has meaningful data - remove from queue and local cache
                     successful.append(i)
                     self.logger.info(f"Skipping sync for {check_in['guest_name']} at {check_in['station']} - already in Google Sheets")
 
@@ -225,9 +226,10 @@ class CheckInQueue:
                 else:
                     # Check if Google Sheets already has ANY data for this check-in (even different timestamp)
                     existing_guest = self.sheets_service.find_guest_by_id(check_in['original_id'])
-                    if existing_guest and existing_guest.get_check_in_time(check_in['station'].lower()):
+                    existing_sheets_time = existing_guest.get_check_in_time(check_in['station'].lower()) if existing_guest else None
+                    if existing_guest and existing_sheets_time and str(existing_sheets_time).strip():
                         # Google Sheets has different data - accept Google Sheets as truth
-                        sheets_time = existing_guest.get_check_in_time(check_in['station'].lower())
+                        sheets_time = existing_sheets_time
                         self.logger.warning(f"Sync conflict: {check_in['guest_name']} at {check_in['station']} - "
                                           f"Local: {check_in['timestamp']}, Sheets: {sheets_time} - "
                                           f"Keeping Google Sheets data")
@@ -306,9 +308,11 @@ class CheckInQueue:
                 # Check each station in local cache
                 for station, local_time in local_stations.items():
                     sheets_time = guest.get_check_in_time(station)
+                    # Validate that sheets_time is meaningful (not empty/whitespace)
+                    sheets_time_valid = sheets_time and str(sheets_time).strip()
 
-                    # Conflict: local has data but Google Sheets doesn't
-                    if local_time and not sheets_time:
+                    # Conflict: local has data but Google Sheets doesn't (or has empty data)
+                    if local_time and not sheets_time_valid:
                         # Check if already in queue
                         already_queued = any(
                             item['original_id'] == original_id and

@@ -67,12 +67,20 @@ class GuestRecord:
     def is_checked_in_at(self, station: str) -> bool:
         """Check if guest is checked in at a specific station."""
         station = station.lower()
-        return station in self.check_ins and self.check_ins[station] is not None
+        time_value = self.check_ins.get(station)
+        # Consider empty or whitespace-only strings as not checked in
+        if isinstance(time_value, str) and not time_value.strip():
+            return False
+        return time_value is not None
         
     def get_check_in_time(self, station: str) -> Optional[Union[str, datetime]]:
         """Get check-in time for a specific station."""
         station = station.lower()
-        return self.check_ins.get(station)
+        time_value = self.check_ins.get(station)
+        # Return None for empty or whitespace-only strings
+        if isinstance(time_value, str) and not time_value.strip():
+            return None
+        return time_value
         
     def assign_tag(self, tag_uid: str) -> None:
         """Assign an NFC tag to this guest."""

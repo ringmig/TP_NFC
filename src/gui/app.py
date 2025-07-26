@@ -28,14 +28,13 @@ class NFCApp(ctk.CTk):
 
     # Status message constants
     STATUS_READY_REGISTRATION = ""
-    STATUS_READY_WAITING_FOR_CHECKIN = "Ready. Waiting on check-in..."
+    STATUS_READY_WAITING_FOR_CHECKIN = "Check-in service running in the background..."
     STATUS_WAITING_FOR_CHECKIN = "Waiting on check-in..."
     STATUS_READY_CHECKIN = ""
     STATUS_CHECKIN_PAUSED = "Check-in Paused"
     STATUS_NFC_NOT_CONNECTED = "⚠️ NFC READER NOT CONNECTED"
     STATUS_NFC_CONNECTED = "✅ NFC reader connected"
     STATUS_NO_TAG_DETECTED = "No tag detected"
-    STATUS_NETWORK_ERROR = "⚠️ Network Error - Check connection"
     STATUS_PLEASE_ENTER_GUEST_ID = "Please enter a Guest ID"
     STATUS_INVALID_ID_FORMAT = "Invalid ID format"
     STATUS_TAG_ALREADY_REGISTERED = "⚠️ Tag already registered to {guest_name}"
@@ -69,6 +68,7 @@ class NFCApp(ctk.CTk):
         self.is_checkpoint_mode = True  # Reception has both registration UI and checkpoint scanning
         self.guest_list_visible = False
         self.checkin_buttons_visible = False  # Hidden by default
+        self.show_all_stations = True  # False = current station only
         self.settings_visible = False  # Settings panel visibility
         self.is_rewrite_mode = False  # Rewrite tag mode
         self.guests_data = []
@@ -151,8 +151,21 @@ class NFCApp(ctk.CTk):
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
         
+        # Grab focus when app launches
+        self.after(100, self._grab_app_focus)
+        
         # Start NFC connection monitoring after initial data load
         self.after(2500, self.start_nfc_connection_monitoring)
+
+    def _grab_app_focus(self):
+        """Grab focus when app launches."""
+        try:
+            self.lift()  # Bring window to front
+            self.focus_force()  # Force focus to the window
+            self.attributes('-topmost', True)  # Temporarily make topmost
+            self.after(1000, lambda: self.attributes('-topmost', False))  # Remove topmost after 1s
+        except Exception as e:
+            self.logger.debug(f"Could not grab app focus: {e}")
 
     def _update_status_with_correct_type(self):
         """Update status with correct message and type based on current state."""
@@ -280,8 +293,8 @@ class NFCApp(ctk.CTk):
 
     def get_ready_status_message(self):
         """Get the appropriate ready status message based on current mode."""
-        # Always check NFC connection first
-        if not self._nfc_connected:
+        # Always check NFC connection first - use real-time check for accuracy
+        if not self.nfc_service.is_connected:
             return self.STATUS_NFC_NOT_CONNECTED
         # Don't show ready messages in settings
         elif self.settings_visible:
@@ -592,7 +605,7 @@ class NFCApp(ctk.CTk):
         self.logo_label = ctk.CTkLabel(header_frame, text="", width=80, height=80)
         self.logo_label.pack(side="left", padx=20)
 
-        # Settings button on the right
+        # Settings button on the right - modernized hamburger menu
         self.settings_btn = ctk.CTkButton(
             header_frame,
             text="☰",
@@ -601,19 +614,41 @@ class NFCApp(ctk.CTk):
             height=50,
             corner_radius=10,
             font=CTkFont(size=20, weight="bold"),
-            fg_color="#4a4a4a",
-            hover_color="#5a5a5a"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#6c757d",
+            border_color="#6c757d",
+            hover=False  # Disable built-in hover
         )
-        self.settings_btn.pack(side="right", padx=20)
-
-        # Sync status label (to the left of settings button)
+        
+        # Add hover effects for hamburger menu
+        def on_hamburger_enter(event):
+            if not self.settings_visible:  # Only apply hover in hamburger mode
+                self.settings_btn.configure(
+                    fg_color="#6c757d",
+                    text_color="#ffffff"
+                )
+                
+        def on_hamburger_leave(event):
+            if not self.settings_visible:  # Only apply hover in hamburger mode
+                self.settings_btn.configure(
+                    fg_color="transparent",
+                    text_color="#6c757d"
+                )
+        
+        self.settings_btn.bind("<Enter>", on_hamburger_enter)
+        self.settings_btn.bind("<Leave>", on_hamburger_leave)
+        # Settings button first (will be rightmost)
+        self.settings_btn.pack(side="right", padx=(0, 20))
+        
+        # Sync status label second (will be to the left of settings button)
         self.sync_status_label = ctk.CTkLabel(
             header_frame,
             text="",
             font=self.fonts['body'],
             text_color="#4CAF50"
         )
-        self.sync_status_label.pack(side="right", padx=(0, 10))
+        self.sync_status_label.pack(side="right", padx=(0, 20))
         self.update_settings_button()
 
         # Station buttons centered
@@ -641,7 +676,7 @@ class NFCApp(ctk.CTk):
         
         # Use cached stations to avoid repeated API calls
         try:
-            available_stations = self._get_stations_cached()
+            available_stations = self._get_filtered_stations_for_view()
         except Exception as e:
             self.logger.warning(f"Could not get stations: {e}")
             available_stations = self.config['stations']
@@ -655,8 +690,31 @@ class NFCApp(ctk.CTk):
                 height=50,
                 corner_radius=12,
                 font=CTkFont(size=15, weight="bold"),
-                border_width=2
+                border_width=2,
+                fg_color="transparent",  # No fill by default
+                text_color="#3b82f6",   # Blue text color
+                border_color="#3b82f6"  # Blue border
+                # hover_color removed - handled by custom events
             )
+            
+            # Add hover text color control
+            def on_enter(event, button=btn, station_name=station):
+                if station_name != self.current_station:  # Only for non-selected buttons
+                    button.configure(
+                        fg_color="#3b82f6",      # Blue fill on hover
+                        text_color="#212121"     # Dark grey text on hover
+                    )
+            
+            def on_leave(event, button=btn, station_name=station):
+                if station_name != self.current_station:  # Only for non-selected buttons
+                    button.configure(
+                        fg_color="transparent",  # Back to transparent
+                        text_color="#3b82f6"     # Back to blue text
+                    )
+            
+            btn.bind("<Enter>", on_enter)
+            btn.bind("<Leave>", on_leave)
+            
             btn.pack(side="left", padx=3)
             self.station_buttons[station] = btn
 
@@ -721,7 +779,7 @@ class NFCApp(ctk.CTk):
         search_label.pack(side="left", padx=(0, 10))
 
         self.search_var = tk.StringVar()
-        self.search_var.trace('w', lambda *args: self.filter_guest_list())
+        self.search_var.trace('w', lambda *args: self._on_search_change())
         self.search_entry = ctk.CTkEntry(
             search_frame,
             textvariable=self.search_var,
@@ -730,6 +788,20 @@ class NFCApp(ctk.CTk):
         )
         self.search_entry.pack(side="left")
 
+        # Station view toggle switch (modern toggle)
+        self.station_view_switch = ctk.CTkSwitch(
+            search_frame,
+            text="All Stations",
+            command=self.toggle_station_view,
+            width=120,
+            height=24,
+            button_color="#2196F3",
+            progress_color="#1976D2",
+            font=self.fonts['button']
+        )
+        # Set initial state (True = All Stations, False = Single Station)
+        self.station_view_switch.select()
+        
         # Manual check-in button (moved here from action buttons)
         self.manual_checkin_btn = ctk.CTkButton(
             search_frame,
@@ -739,10 +811,45 @@ class NFCApp(ctk.CTk):
             height=35,
             corner_radius=8,
             font=self.fonts['button'],
-            fg_color="#ff9800",
-            hover_color="#f57c00"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#ff9800",
+            border_color="#ff9800",
+            hover=False  # Disable built-in hover
         )
-        # Button will be shown/hidden in update_mode_content
+        
+        # Add hover effects for manual checkin button
+        def on_manual_checkin_enter(event):
+            if self.checkin_buttons_visible:
+                # Grey theme for cancel state
+                self.manual_checkin_btn.configure(
+                    fg_color="#6c757d",
+                    text_color="#212121"
+                )
+            else:
+                # Orange theme for normal state
+                self.manual_checkin_btn.configure(
+                    fg_color="#ff9800",
+                    text_color="#212121"
+                )
+                
+        def on_manual_checkin_leave(event):
+            if self.checkin_buttons_visible:
+                # Grey outline for cancel state
+                self.manual_checkin_btn.configure(
+                    fg_color="transparent",
+                    text_color="#6c757d"
+                )
+            else:
+                # Orange outline for normal state
+                self.manual_checkin_btn.configure(
+                    fg_color="transparent",
+                    text_color="#ff9800"
+                )
+        
+        self.manual_checkin_btn.bind("<Enter>", on_manual_checkin_enter)
+        self.manual_checkin_btn.bind("<Leave>", on_manual_checkin_leave)
+        # Buttons will be shown/hidden in update_mode_content
 
 
         # Guest list (using tkinter Treeview for table)
@@ -763,13 +870,8 @@ class NFCApp(ctk.CTk):
         scrollbar.pack(side="right", fill="y")
 
         # Overview mode: show all stations
-        # Get dynamic stations for table columns
-        # Use cached stations to avoid repeated API calls
-        try:
-            available_stations = self._get_stations_cached()
-        except Exception as e:
-            self.logger.warning(f"Could not get stations for table: {e}")
-            available_stations = self.config['stations']
+        # Get stations for table columns (filtered by view mode)
+        available_stations = self._get_filtered_stations_for_view()
         
         columns = ("id", "first", "last") + tuple(station.lower() for station in available_stations)
 
@@ -794,6 +896,7 @@ class NFCApp(ctk.CTk):
 
         # Configure column headers and widths for both trees
         for tree in [self.summary_tree, self.guest_tree]:
+            # Set initial headers (will be updated with guest count later)
             tree.heading("id", text="Guest ID", anchor="w")
             tree.heading("first", text="First Name", anchor="w")
             tree.heading("last", text="Last Name", anchor="w")
@@ -900,37 +1003,19 @@ class NFCApp(ctk.CTk):
     def _update_row_styling(self, item, guest_id):
         """Update row styling after edit to reflect complete status."""
         try:
-            # Get current available stations
-            available_stations = self._get_stations_cached()
+            # Get stations based on current view mode
+            view_stations = self._get_filtered_stations_for_view()
             
             # Get the current values from the tree item
             item_values = self.guest_tree.item(item)['values']
             
-            # Check if all station columns have check-ins (including local queue)
-            fully_checked_in = True
-            
-            # Get local check-ins for this guest
-            local_checkins = self.tag_manager.get_all_local_check_ins().get(int(guest_id), {})
-            
-            # Station columns start at index 3 (after id, first, last)
-            for i, station in enumerate(available_stations):
-                col_index = i + 3
-                station_lower = station.lower()
-                
-                # Check tree value first
-                tree_has_checkin = False
-                if col_index < len(item_values):
-                    value = item_values[col_index]
-                    # A check-in exists if it starts with ✓ or has actual timestamp data
-                    tree_has_checkin = value.startswith("✓") or (value not in ["-", "", "Check-in"])
-                
-                # Check local queue
-                local_has_checkin = station_lower in local_checkins
-                
-                # If neither tree nor local has check-in, not fully checked in
-                if not tree_has_checkin and not local_has_checkin:
-                    fully_checked_in = False
-                    break
+            # Check completion based on view mode
+            if self.show_all_stations:
+                # All stations mode: must have check-ins at ALL stations
+                fully_checked_in = self._is_guest_complete_all_stations(int(guest_id), view_stations, item_values)
+            else:
+                # Current station mode: only need check-in at current station
+                fully_checked_in = self._is_guest_complete_current_station(int(guest_id), item_values)
             
             # Apply appropriate styling
             if fully_checked_in:
@@ -976,7 +1061,7 @@ class NFCApp(ctk.CTk):
             font=CTkFont(size=32, weight="bold"),
             text_color="#4CAF50"
         )
-        name_label.pack(pady=(0, 30))
+        name_label.pack(pady=(0, 20))
 
         # Find last check-in
         last_station = None
@@ -986,19 +1071,42 @@ class NFCApp(ctk.CTk):
                 last_station = station.title()
                 last_time = time
 
-        # Last check-in info
         if last_station and last_time:
-            checkin_text = f"Last check-in: {last_station} at {last_time}"
-        else:
-            checkin_text = "No check-ins recorded"
+            # Last check-in:
+            checkin_header_label = ctk.CTkLabel(
+                center_frame,
+                text="Last check-in:",
+                font=CTkFont(size=18),
+                text_color="#ffffff"
+            )
+            checkin_header_label.pack(pady=(0, 10))
 
-        checkin_label = ctk.CTkLabel(
-            center_frame,
-            text=checkin_text,
-            font=CTkFont(size=18),
-            text_color="#ffffff"
-        )
-        checkin_label.pack(pady=(0, 30))
+            # Station name
+            station_label = ctk.CTkLabel(
+                center_frame,
+                text=last_station,
+                font=CTkFont(size=24, weight="bold"),
+                text_color="#ffffff"
+            )
+            station_label.pack(pady=(0, 10))
+
+            # Check-in time
+            time_label = ctk.CTkLabel(
+                center_frame,
+                text=last_time,
+                font=CTkFont(size=24, weight="bold"),
+                text_color="#ffffff"
+            )
+            time_label.pack(pady=(0, 30))
+        else:
+            # No check-ins recorded
+            no_checkin_label = ctk.CTkLabel(
+                center_frame,
+                text="No check-ins recorded",
+                font=CTkFont(size=18),
+                text_color="#ffffff"
+            )
+            no_checkin_label.pack(pady=(0, 30))
 
         # Countdown label
         self.tag_info_countdown_label = ctk.CTkLabel(
@@ -1018,9 +1126,27 @@ class NFCApp(ctk.CTk):
             height=50,
             corner_radius=10,
             font=CTkFont(size=20, weight="bold"),
-            fg_color="#dc3545",
-            hover_color="#c82333"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#dc3545",
+            border_color="#dc3545"
         )
+        
+        # Add hover effects for close button
+        def on_close_enter(event, button=close_btn):
+            button.configure(
+                fg_color="#dc3545",
+                text_color="#212121"
+            )
+            
+        def on_close_leave(event, button=close_btn):
+            button.configure(
+                fg_color="transparent",
+                text_color="#dc3545"
+            )
+            
+        close_btn.bind("<Enter>", on_close_enter)
+        close_btn.bind("<Leave>", on_close_leave)
         close_btn.pack()
 
         # Start auto-close countdown
@@ -1041,23 +1167,22 @@ class NFCApp(ctk.CTk):
             self.close_tag_info()
 
     def close_tag_info(self):
-        """Close tag info display and return to normal mode."""
+        """Close tag info display and return to station view."""
         # Stop auto-close countdown
         self._tag_info_auto_close_active = False
 
         self.is_displaying_tag_info = False
         self.tag_info_data = None
 
-        # Return to appropriate view based on where we came from
-        if hasattr(self, '_came_from_settings') and self._came_from_settings:
-            # Return to settings if that's where we came from
-            self.settings_visible = True
+        # Always return to station view (not settings)
+        self.settings_visible = False
+        self._cancel_settings_timer()
+        # Clear search field when closing settings
+        self.clear_search()
+        
+        # Clean up came_from_settings flag if it exists
+        if hasattr(self, '_came_from_settings'):
             delattr(self, '_came_from_settings')
-        else:
-            # Otherwise return to station view
-            self.settings_visible = False
-            # Clear search field when closing settings
-            self.clear_search()
 
         # Status bar frame is never hidden, only content is cleared, so no need to restore it
 
@@ -1103,9 +1228,20 @@ class NFCApp(ctk.CTk):
             height=50,
             corner_radius=8,
             font=self.fonts['button'],
-            fg_color="#2196F3",
-            hover_color="#1976D2"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#2196F3",
+            border_color="#2196F3"
         )
+        
+        # Add hover effects for Tag Info button
+        def on_tag_info_enter(event):
+            self.tag_info_btn.configure(fg_color="#2196F3", text_color="#212121")
+        def on_tag_info_leave(event):
+            self.tag_info_btn.configure(fg_color="transparent", text_color="#2196F3")
+        
+        self.tag_info_btn.bind("<Enter>", on_tag_info_enter)
+        self.tag_info_btn.bind("<Leave>", on_tag_info_leave)
         self.tag_info_btn.pack(side="left")
 
         # Rewrite Tag button
@@ -1117,26 +1253,23 @@ class NFCApp(ctk.CTk):
             height=50,
             corner_radius=8,
             font=self.fonts['button'],
-            fg_color="#ff9800",
-            hover_color="#f57c00"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#ff9800",
+            border_color="#ff9800"
         )
+        
+        # Add hover effects for Rewrite Tag button (settings)
+        def on_rewrite_tag_enter(event):
+            self.rewrite_tag_btn.configure(fg_color="#ff9800", text_color="#212121")
+        def on_rewrite_tag_leave(event):
+            self.rewrite_tag_btn.configure(fg_color="transparent", text_color="#ff9800")
+        
+        self.rewrite_tag_btn.bind("<Enter>", on_rewrite_tag_enter)
+        self.rewrite_tag_btn.bind("<Leave>", on_rewrite_tag_leave)
         self.rewrite_tag_btn.pack(pady=10)
 
-        # Refresh Guest List button
-        self.refresh_btn = ctk.CTkButton(
-            buttons_container,
-            text="Refresh Guest List",
-            command=self.refresh_guest_data,
-            width=200,
-            height=50,
-            corner_radius=8,
-            font=self.fonts['button'],
-            fg_color="#4CAF50",
-            hover_color="#45a049"
-        )
-        self.refresh_btn.pack(pady=10)
-
-        # Erase Tag button with frame for cancel button
+        # Erase Tag button with frame for cancel button (moved up)
         erase_frame = ctk.CTkFrame(buttons_container, fg_color="transparent")
         erase_frame.pack(pady=10)
 
@@ -1148,10 +1281,46 @@ class NFCApp(ctk.CTk):
             height=50,
             corner_radius=8,
             font=self.fonts['button'],
-            fg_color="#dc3545",
-            hover_color="#c82333"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#dc3545",
+            border_color="#dc3545"
         )
+        
+        # Add hover effects for Erase Tag button
+        def on_erase_enter(event):
+            self.settings_erase_btn.configure(fg_color="#dc3545", text_color="#212121")
+        def on_erase_leave(event):
+            self.settings_erase_btn.configure(fg_color="transparent", text_color="#dc3545")
+        
+        self.settings_erase_btn.bind("<Enter>", on_erase_enter)
+        self.settings_erase_btn.bind("<Leave>", on_erase_leave)
         self.settings_erase_btn.pack(side="left")
+
+        # Refresh Guest List button (moved down)
+        self.refresh_btn = ctk.CTkButton(
+            buttons_container,
+            text="Refresh Guest List",
+            command=self.refresh_guest_data,
+            width=200,
+            height=50,
+            corner_radius=8,
+            font=self.fonts['button'],
+            border_width=2,
+            fg_color="transparent",
+            text_color="#4CAF50",
+            border_color="#4CAF50"
+        )
+        
+        # Add hover effects for Refresh Guest List button
+        def on_refresh_enter(event):
+            self.refresh_btn.configure(fg_color="#4CAF50", text_color="#212121")
+        def on_refresh_leave(event):
+            self.refresh_btn.configure(fg_color="transparent", text_color="#4CAF50")
+        
+        self.refresh_btn.bind("<Enter>", on_refresh_enter)
+        self.refresh_btn.bind("<Leave>", on_refresh_leave)
+        self.refresh_btn.pack(pady=10)
 
         # Log button
         self.log_btn = ctk.CTkButton(
@@ -1162,9 +1331,20 @@ class NFCApp(ctk.CTk):
             height=50,
             corner_radius=8,
             font=self.fonts['button'],
-            fg_color="#9c27b0",
-            hover_color="#7b1fa2"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#9c27b0",
+            border_color="#9c27b0"
         )
+        
+        # Add hover effects for View Logs button
+        def on_logs_enter(event):
+            self.log_btn.configure(fg_color="#9c27b0", text_color="#212121")
+        def on_logs_leave(event):
+            self.log_btn.configure(fg_color="transparent", text_color="#9c27b0")
+        
+        self.log_btn.bind("<Enter>", on_logs_enter)
+        self.log_btn.bind("<Leave>", on_logs_leave)
         self.log_btn.pack(pady=10)
 
         # Advanced button
@@ -1176,9 +1356,20 @@ class NFCApp(ctk.CTk):
             height=50,
             corner_radius=8,
             font=self.fonts['button'],
-            fg_color="#6c757d",
-            hover_color="#5a6268"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#6c757d",
+            border_color="#6c757d"
         )
+        
+        # Add hover effects for Advanced button
+        def on_advanced_enter(event):
+            self.dev_mode_btn.configure(fg_color="#6c757d", text_color="#212121")
+        def on_advanced_leave(event):
+            self.dev_mode_btn.configure(fg_color="transparent", text_color="#6c757d")
+        
+        self.dev_mode_btn.bind("<Enter>", on_advanced_enter)
+        self.dev_mode_btn.bind("<Leave>", on_advanced_leave)
         self.dev_mode_btn.pack(pady=10)
 
 
@@ -1192,10 +1383,9 @@ class NFCApp(ctk.CTk):
             return
             
         if self.settings_visible:
+            # If settings are already open, close them
             self.settings_visible = False
-            if self._settings_timer:
-                self.after_cancel(self._settings_timer)
-                self._settings_timer = None
+            self._cancel_settings_timer()
             # Clear search field when closing settings
             self.clear_search()
             # Reset erase confirmation state when leaving settings
@@ -1211,21 +1401,14 @@ class NFCApp(ctk.CTk):
                 self._update_status_with_correct_type()
         else:
             self.settings_visible = True
-            self._settings_timer = self.after(15000, self._auto_close_settings)
+            # Always stop any old timer and start fresh when opening settings
+            self._cancel_settings_timer()  # Stop any ghost timers
+            self._restart_settings_timer()  # Start fresh timer
             # Don't stop scanning when entering settings
-            # Show appropriate status in settings - only for check-in modes
-            if self.is_checkpoint_mode or (not self.is_registration_mode):
-                if not self._nfc_connected:
-                    self.update_status(self.STATUS_NFC_NOT_CONNECTED, "error")
-                else:
-                    self.update_status(self.STATUS_READY_WAITING_FOR_CHECKIN, "normal")
-            else:
-                # Registration mode in settings - only show NFC disconnection errors
-                if not self._nfc_connected:
-                    self.update_status(self.STATUS_NFC_NOT_CONNECTED, "error")
-                else:
-                    self.update_status("", "normal")
+            # Show appropriate status in settings using real-time status
+            self._update_status_respecting_settings_mode_with_correct_type()
             self.update_mode_content()
+        
         self.update_settings_button()
 
     def update_settings_button(self):
@@ -1234,19 +1417,72 @@ class NFCApp(ctk.CTk):
             # Hide hamburger button completely when in tag info view or rewrite mode
             self.settings_btn.pack_forget()
         elif self.settings_visible:
-            self.settings_btn.pack(side="right", padx=20)
+            # Ensure button is visible and update appearance for settings mode
+            if not self.settings_btn.winfo_ismapped():
+                # Re-pack both elements in correct order to maintain layout
+                self.sync_status_label.pack_forget()
+                self.settings_btn.pack(side="right", padx=(0, 20))
+                self.sync_status_label.pack(side="right", padx=(0, 20))
             self.settings_btn.configure(
                 text="✕",
-                fg_color="#dc3545",
-                hover_color="#c82333"
+                border_width=2,
+                fg_color="transparent",
+                text_color="#dc3545",
+                border_color="#dc3545"
             )
+            
+            # Add hover effects for X mode
+            def on_settings_x_enter(event):
+                if self.settings_visible:  # Only apply hover in X mode
+                    self.settings_btn.configure(
+                        fg_color="#dc3545",
+                        text_color="#212121"
+                    )
+                    
+            def on_settings_x_leave(event):
+                if self.settings_visible:  # Only apply hover in X mode
+                    self.settings_btn.configure(
+                        fg_color="transparent",
+                        text_color="#dc3545"
+                    )
+            
+            # Remove old bindings and add new ones
+            self.settings_btn.unbind("<Enter>")
+            self.settings_btn.unbind("<Leave>")
+            self.settings_btn.bind("<Enter>", on_settings_x_enter)
+            self.settings_btn.bind("<Leave>", on_settings_x_leave)
         else:
-            self.settings_btn.pack(side="right", padx=20)
+            # Ensure button is visible and update appearance for normal mode
+            if not self.settings_btn.winfo_ismapped():
+                # Re-pack both elements in correct order to maintain layout
+                self.sync_status_label.pack_forget()
+                self.settings_btn.pack(side="right", padx=(0, 20))
+                self.sync_status_label.pack(side="right", padx=(0, 20))
             self.settings_btn.configure(
                 text="☰",
-                fg_color="#4a4a4a",
-                hover_color="#5a5a5a"
+                border_width=2,
+                fg_color="transparent",
+                text_color="#6c757d",
+                border_color="#6c757d"
             )
+            
+            # Restore hamburger hover bindings
+            def on_hamburger_enter(event):
+                if not self.settings_visible:
+                    self.settings_btn.configure(
+                        fg_color="#6c757d",
+                        text_color="#ffffff"
+                    )
+                    
+            def on_hamburger_leave(event):
+                if not self.settings_visible:
+                    self.settings_btn.configure(
+                        fg_color="transparent",
+                        text_color="#6c757d"
+                    )
+            
+            self.settings_btn.bind("<Enter>", on_hamburger_enter)
+            self.settings_btn.bind("<Leave>", on_hamburger_leave)
 
     def update_mode_content(self):
         """Update content based on current mode."""
@@ -1288,26 +1524,34 @@ class NFCApp(ctk.CTk):
                 self.list_frame.pack(fill="both", expand=True, pady=(10, 0))
                 self.guest_list_visible = True
 
-            # Show manual check-in button for all stations (in search bar area)
+            # Show buttons for all stations (in search bar area)
             if not self.is_rewrite_mode:
-                # Manual check-in button positioning
+                # Manual check-in button positioning (rightmost)
                 self.manual_checkin_btn.pack(side="right", padx=(10, 0))
+                
+                # Station view toggle switch (to the left of manual check-in)
+                self.station_view_switch.pack(side="right", padx=(10, 5))
                 
                 # Update button text based on current manual check-in state
                 if self.checkin_buttons_visible:
                     self.manual_checkin_btn.configure(
                         text="Cancel Manual Check-in",
-                        fg_color="#6c757d",
-                        hover_color="#5a6268"
+                        border_width=2,
+                        fg_color="transparent",
+                        text_color="#6c757d",
+                        border_color="#6c757d"
                     )
                 else:
                     self.manual_checkin_btn.configure(
                         text="Manual Check-in",
-                        fg_color="#ff9800",
-                        hover_color="#f57c00"
+                        border_width=2,
+                        fg_color="transparent",
+                        text_color="#ff9800",
+                        border_color="#ff9800"
                     )
             else:
-                # Hide button in rewrite mode
+                # Hide buttons in rewrite mode
+                self.station_view_switch.pack_forget()
                 self.manual_checkin_btn.pack_forget()
 
         if self.is_rewrite_mode:
@@ -1325,11 +1569,10 @@ class NFCApp(ctk.CTk):
         center_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
         center_frame.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Always show registration UI elements
         # Instructions
         instruction_label = ctk.CTkLabel(
             center_frame,
-            text="Enter Guest ID to register:",
+            text="",
             font=self.fonts['heading']
         )
         instruction_label.pack(pady=(0, 20))
@@ -1357,8 +1600,22 @@ class NFCApp(ctk.CTk):
             width=120,
             height=50,
             font=self.fonts['button'],
-            corner_radius=8
+            corner_radius=8,
+            border_width=2,
+            fg_color="transparent",
+            text_color="#4CAF50",
+            border_color="#4CAF50",
+            hover=False  # Disable built-in hover
         )
+        
+        # Add hover effects for Write Tag button
+        def on_write_enter(event):
+            self.write_btn.configure(fg_color="#4CAF50", text_color="#212121")
+        def on_write_leave(event):
+            self.write_btn.configure(fg_color="transparent", text_color="#4CAF50")
+        
+        self.write_btn.bind("<Enter>", on_write_enter)
+        self.write_btn.bind("<Leave>", on_write_leave)
         self.write_btn.pack(side="left")
 
         # Guest name display (initially hidden)
@@ -1533,7 +1790,7 @@ class NFCApp(ctk.CTk):
         except Exception as e:
             # Network/connection error - don't show "missing guest" message
             self._active_operations -= 1
-            self.after(0, self.update_status, self.STATUS_NETWORK_ERROR, "error")
+            # Network error - status already shown in sync label
             self.after(3000, self._restart_registration_scanning)
             return
 
@@ -1621,9 +1878,20 @@ class NFCApp(ctk.CTk):
             height=50,
             font=self.fonts['button'],
             corner_radius=8,
-            fg_color="#ff9800",
-            hover_color="#f57c00"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#ff9800",
+            border_color="#ff9800"
         )
+        
+        # Add hover effects for Rewrite Tag button
+        def on_rewrite_enter(event):
+            self.rewrite_btn.configure(fg_color="#ff9800", text_color="#212121")
+        def on_rewrite_leave(event):
+            self.rewrite_btn.configure(fg_color="transparent", text_color="#ff9800")
+        
+        self.rewrite_btn.bind("<Enter>", on_rewrite_enter)
+        self.rewrite_btn.bind("<Leave>", on_rewrite_leave)
         self.rewrite_btn.pack(side="left")
 
         # Exit rewrite button (red X)
@@ -1635,9 +1903,27 @@ class NFCApp(ctk.CTk):
             height=50,
             corner_radius=8,
             font=CTkFont(size=14, weight="bold"),
-            fg_color="#dc3545",
-            hover_color="#c82333"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#dc3545",
+            border_color="#dc3545"
         )
+        
+        # Add hover effects for exit rewrite button
+        def on_exit_rewrite_enter(event):
+            self.exit_rewrite_btn.configure(
+                fg_color="#dc3545",
+                text_color="#212121"
+            )
+            
+        def on_exit_rewrite_leave(event):
+            self.exit_rewrite_btn.configure(
+                fg_color="transparent",
+                text_color="#dc3545"
+            )
+            
+        self.exit_rewrite_btn.bind("<Enter>", on_exit_rewrite_enter)
+        self.exit_rewrite_btn.bind("<Leave>", on_exit_rewrite_leave)
         self.exit_rewrite_btn.pack(pady=(20, 0))
 
         # Focus on entry
@@ -1763,9 +2049,15 @@ class NFCApp(ctk.CTk):
             # First read the tag to check if it's already registered
             tag = self.nfc_service.read_tag(timeout=10)
             if not tag:
-                # No tag detected
+                # Check what type of error occurred for better user feedback
+                error_type = self.nfc_service.get_last_error_type()
                 self._write_operation_active = False
-                self.after(0, self._write_complete, None)
+                if error_type == 'timeout':
+                    self.after(0, self._write_complete, None, "No tag detected")
+                elif error_type in ('connection_failed', 'read_failed'):
+                    self.after(0, self._write_complete, None, "Failed to read tag - try again")
+                else:
+                    self.after(0, self._write_complete, None, "No tag detected")
                 return
             
             # Check if tag is already registered to a different guest
@@ -1807,7 +2099,7 @@ class NFCApp(ctk.CTk):
             self.logger.error(f"Write operation error: {e}")
             self.after(0, self._write_complete, None)
 
-    def _write_complete(self, result: Optional[Dict]):
+    def _write_complete(self, result: Optional[Dict], error_message: str = None):
         """Handle write completion."""
         # Mark operation complete
         self.operation_in_progress = False
@@ -1838,7 +2130,9 @@ class NFCApp(ctk.CTk):
                 # Refresh guest list after delay to ensure queue is updated and status is visible
                 self.after(2500, lambda: self.refresh_guest_data(user_initiated=False))
         else:
-            self.update_status(self.STATUS_NO_TAG_DETECTED, "error")
+            # Use custom error message if provided, otherwise use default
+            message = error_message if error_message else self.STATUS_NO_TAG_DETECTED
+            self.update_status(message, "error")
 
         self.id_entry.focus()
         
@@ -1956,7 +2250,7 @@ class NFCApp(ctk.CTk):
             except Exception as e:
                 # Network/connection error - don't show "missing guest" message
                 self._active_operations -= 1
-                self.after(0, self.update_status, self.STATUS_NETWORK_ERROR, "error")
+                # Network error - status already shown in sync label
                 self.after(2000, self._restart_scanning_after_error)
                 return
 
@@ -2125,6 +2419,7 @@ class NFCApp(ctk.CTk):
 
     def erase_tag_settings(self):
         """Erase tag functionality from settings panel with two-step confirmation."""
+        self._restart_settings_timer()  # Restart timer on button interaction
         self.logger.info("User clicked Erase Tag button")
         if not self.erase_confirmation_state:
             # First click - show confirmation
@@ -2196,8 +2491,10 @@ class NFCApp(ctk.CTk):
                 'settings_erase_btn',
                 lambda w: w.configure(
                     text="Erase Tag",
-                    fg_color="#dc3545",
-                    hover_color="#c82333"
+                    border_width=2,
+                    fg_color="transparent",
+                    text_color="#dc3545",
+                    border_color="#dc3545"
                 )
             )
 
@@ -2301,6 +2598,7 @@ class NFCApp(ctk.CTk):
 
     def tag_info(self):
         """Show tag information functionality."""
+        self._restart_settings_timer()  # Restart timer on button interaction
         self.logger.info("User clicked Tag Info button")
         # Check NFC connection first
         if not self._nfc_connected:
@@ -2429,8 +2727,17 @@ class NFCApp(ctk.CTk):
                 info = self.tag_manager.get_tag_info(tag.uid)
                 self.after(0, self._tag_info_complete, info)
             else:
-                # No tag detected
-                self.after(0, self.update_status, "No tag detected", "error")
+                # Check what type of error occurred
+                error_type = self.nfc_service.get_last_error_type()
+                if error_type == 'timeout':
+                    self.after(0, self.update_status, "No tag detected", "error")
+                elif error_type == 'connection_failed':
+                    self.after(0, self.update_status, "Failed to read tag - try again", "error")
+                elif error_type == 'read_failed':
+                    self.after(0, self.update_status, "Failed to read tag - try again", "error")
+                else:
+                    # Fallback message
+                    self.after(0, self.update_status, "No tag detected", "error")
                 self.after(0, self._cleanup_tag_info)
 
         except Exception as e:
@@ -2453,12 +2760,13 @@ class NFCApp(ctk.CTk):
             try:
                 guest = self.sheets_service.find_guest_by_id(tag_info['original_id'])
             except Exception as e:
-                self.update_status(self.STATUS_NETWORK_ERROR, "error")
+                # Network error - status already shown in sync label
                 return
 
             if guest:
                 # Clear settings mode and switch to inline display mode
                 self.settings_visible = False
+                self._cancel_settings_timer()
                 # Clear search field when closing settings
                 self.clear_search()
                 self.is_displaying_tag_info = True
@@ -2511,6 +2819,7 @@ class NFCApp(ctk.CTk):
         """Auto-close settings after 15 seconds."""
         if self.settings_visible:
             self.settings_visible = False
+            self._cancel_settings_timer()
             # Clear search field when closing settings
             self.clear_search()
             # Reset erase confirmation state when leaving settings
@@ -2518,16 +2827,33 @@ class NFCApp(ctk.CTk):
             # Clear any stale settings references
             if hasattr(self, '_came_from_settings'):
                 delattr(self, '_came_from_settings')
+            self.update_settings_button()  # Fix: Update hamburger menu state
             self.update_mode_content()
             # Return to appropriate status
             if self.is_rewrite_mode:
                 self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
             else:
                 self._update_status_with_correct_type()
-        self._settings_timer = None
+
+    def _cancel_settings_timer(self):
+        """Cancel the settings auto-close timer."""
+        if self._settings_timer:
+            self.after_cancel(self._settings_timer)
+            self._settings_timer = None
+            
+    def _restart_settings_timer(self):
+        """Restart the settings auto-close timer after user interaction."""
+        if self.settings_visible:
+            # Cancel existing timer if any
+            if self._settings_timer:
+                self.after_cancel(self._settings_timer)
+            # Start new timer
+            self._settings_timer = self.after(15000, self._auto_close_settings)
+            self.logger.debug("Settings timer restarted due to user interaction")
 
     def show_logs(self):
         """Show log viewer dialog."""
+        self._restart_settings_timer()  # Restart timer on button interaction
         self.logger.info("User opened log viewer")
         log_window = ctk.CTkToplevel(self)
         log_window.title("Application Logs")
@@ -2542,7 +2868,7 @@ class NFCApp(ctk.CTk):
 
         # Title
         title_label = ctk.CTkLabel(log_window, text="", font=self.fonts['heading'])
-        title_label.pack(pady=20)
+        title_label.pack(pady=5)
 
         # Log display frame
         log_frame = ctk.CTkFrame(log_window)
@@ -2595,23 +2921,127 @@ class NFCApp(ctk.CTk):
         except Exception as e:
             log_text.insert("1.0", f"Error loading logs: {e}")
 
-        # Close button
+        # Close button - modernized
         close_btn = ctk.CTkButton(
             log_window,
-            text="Close",
+            text="✕ Close",
             command=log_window.destroy,
-            width=100,
-            height=35
+            width=120,
+            height=40,
+            corner_radius=8,
+            font=CTkFont(size=14, weight="bold"),
+            border_width=2,
+            fg_color="transparent",
+            text_color="#3b82f6",
+            border_color="#3b82f6"
         )
+        
+        # Add hover effects for log close button
+        def on_log_close_enter(event):
+            close_btn.configure(
+                fg_color="#3b82f6",
+                text_color="#ffffff"
+            )
+            
+        def on_log_close_leave(event):
+            close_btn.configure(
+                fg_color="transparent",
+                text_color="#3b82f6"
+            )
+            
+        close_btn.bind("<Enter>", on_log_close_enter)
+        close_btn.bind("<Leave>", on_log_close_leave)
         close_btn.pack(pady=(0, 20))
+        
+        # Set up auto-refresh
+        self._setup_log_auto_refresh(log_text, log_window)
+
+    def _setup_log_auto_refresh(self, text_widget, window):
+        """Set up auto-refresh for log content."""
+        def refresh_logs():
+            if not window.winfo_exists():
+                return
+                
+            try:
+                # Clear current content
+                text_widget.delete("1.0", "end")
+                
+                # Reload log file
+                log_file = Path(self.config['log_file'])
+                if log_file.exists():
+                    with open(log_file, 'r') as f:
+                        log_content = f.read()
+
+                    # Pretty format the logs
+                    lines = log_content.split('\n')
+                    formatted_lines = []
+
+                    for line in lines:
+                        if not line.strip():
+                            continue
+
+                        # Color code by log level
+                        if ' - ERROR - ' in line:
+                            formatted_lines.append(f"🔴 {line}")
+                        elif ' - WARNING - ' in line:
+                            formatted_lines.append(f"🟡 {line}")
+                        elif ' - INFO - ' in line:
+                            formatted_lines.append(f"🔵 {line}")
+                        elif ' - DEBUG - ' in line:
+                            formatted_lines.append(f"⚪ {line}")
+                        else:
+                            formatted_lines.append(line)
+
+                    # Show latest 100 lines for better performance
+                    recent_lines = formatted_lines[-100:] if len(formatted_lines) > 100 else formatted_lines
+                    text_widget.insert("1.0", "\n".join(recent_lines))
+
+                    # Scroll to bottom
+                    text_widget.see("end")
+                else:
+                    text_widget.insert("1.0", "No log file found.")
+                    
+                # Schedule next refresh in 2 seconds
+                window.after(2000, refresh_logs)
+                    
+            except Exception as e:
+                # If refresh fails, just continue
+                text_widget.insert("end", f"\nRefresh error: {e}")
+                window.after(5000, refresh_logs)  # Try again in 5 seconds
+        
+        # Start the refresh cycle
+        window.after(2000, refresh_logs)  # First refresh in 2 seconds
 
     def enter_developer_mode(self):
         """Show password dialog for developer mode."""
+        self._cancel_settings_timer()  # Stop timer - user entering advanced mode
+        
+        # Reset button appearance manually and remove focus (dialog causes state issues)
+        self.dev_mode_btn.configure(
+            fg_color="transparent", 
+            text_color="#6c757d",
+            border_color="#6c757d"
+        )
+        
+        # Force button to lose focus to prevent stuck state
+        self.focus_set()  # Move focus to main window
+        
         password_window = ctk.CTkToplevel(self)
         password_window.title("")
         password_window.geometry("300x300")
         password_window.transient(self)
         password_window.grab_set()
+        
+        # Reset button state when dialog closes
+        def on_password_dialog_close():
+            self.dev_mode_btn.configure(
+                fg_color="transparent", 
+                text_color="#6c757d",
+                border_color="#6c757d"
+            )
+            password_window.destroy()
+            
+        password_window.protocol("WM_DELETE_WINDOW", on_password_dialog_close)
 
         # Center window
         password_window.update_idletasks()
@@ -2663,20 +3093,58 @@ class NFCApp(ctk.CTk):
             command=check_password,
             width=80,
             height=35,
-            font=self.fonts['button']
+            font=self.fonts['button'],
+            border_width=2,
+            fg_color="transparent",
+            text_color="#28a745",
+            border_color="#28a745"
         )
+        
+        # Add hover effects for Enter button
+        def on_enter_btn_enter(event):
+            login_btn.configure(
+                fg_color="#28a745",
+                text_color="#ffffff"
+            )
+            
+        def on_enter_btn_leave(event):
+            login_btn.configure(
+                fg_color="transparent",
+                text_color="#28a745"
+            )
+            
+        login_btn.bind("<Enter>", on_enter_btn_enter)
+        login_btn.bind("<Leave>", on_enter_btn_leave)
         login_btn.pack(side="left", padx=5)
 
         cancel_btn = ctk.CTkButton(
             button_frame,
             text="Cancel",
-            command=password_window.destroy,
+            command=on_password_dialog_close,
             width=80,
             height=35,
             font=self.fonts['button'],
-            fg_color="#6c757d",
-            hover_color="#5a6268"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#6c757d",
+            border_color="#6c757d"
         )
+        
+        # Add hover effects for Cancel button
+        def on_cancel_btn_enter(event):
+            cancel_btn.configure(
+                fg_color="#6c757d",
+                text_color="#ffffff"
+            )
+            
+        def on_cancel_btn_leave(event):
+            cancel_btn.configure(
+                fg_color="transparent",
+                text_color="#6c757d"
+            )
+            
+        cancel_btn.bind("<Enter>", on_cancel_btn_enter)
+        cancel_btn.bind("<Leave>", on_cancel_btn_leave)
         cancel_btn.pack(side="left", padx=5)
 
     def show_developer_mode(self):
@@ -2687,6 +3155,9 @@ class NFCApp(ctk.CTk):
         dev_window.resizable(False, False)
         dev_window.transient(self)
         dev_window.grab_set()
+        
+        # Set up window close protocol to prevent stuck button states
+        dev_window.protocol("WM_DELETE_WINDOW", lambda: dev_window.destroy())
 
         # Center window
         dev_window.update_idletasks()
@@ -2711,29 +3182,100 @@ class NFCApp(ctk.CTk):
             height=50,
             corner_radius=8,
             font=self.fonts['button'],
-            fg_color="#dc3545",
-            hover_color="#c82333"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#dc3545",
+            border_color="#dc3545"
         )
+        
+        # Add hover effects for Clear All Data button
+        def on_clear_all_enter(event):
+            self.clear_all_btn.configure(
+                fg_color="#dc3545",
+                text_color="#ffffff"
+            )
+            
+        def on_clear_all_leave(event):
+            self.clear_all_btn.configure(
+                fg_color="transparent",
+                text_color="#dc3545"
+            )
+            
+        self.clear_all_btn.bind("<Enter>", on_clear_all_enter)
+        self.clear_all_btn.bind("<Leave>", on_clear_all_leave)
         self.clear_all_btn.pack(pady=(0, 30))
 
-        # Close button
+        # Close button - modernized
+        def close_dev_window():
+            """Close developer window and reset Advanced button state."""
+            # Reset the Advanced button state (same as password dialog Cancel)
+            self.dev_mode_btn.configure(
+                fg_color="transparent", 
+                text_color="#6c757d",
+                border_color="#6c757d"
+            )
+            dev_window.destroy()
+            
         close_btn = ctk.CTkButton(
             main_frame,
-            text="Close",
-            command=dev_window.destroy,
-            width=100,
-            height=35
+            text="✕ Close",
+            command=close_dev_window,
+            width=120,
+            height=40,
+            corner_radius=8,
+            font=CTkFont(size=14, weight="bold"),
+            border_width=2,
+            fg_color="transparent",
+            text_color="#3b82f6",
+            border_color="#3b82f6"
         )
+        
+        # Add hover effects for dev close button
+        def on_dev_close_enter(event):
+            close_btn.configure(
+                fg_color="#3b82f6",
+                text_color="#ffffff"
+            )
+            
+        def on_dev_close_leave(event):
+            close_btn.configure(
+                fg_color="transparent",
+                text_color="#3b82f6"
+            )
+            
+        close_btn.bind("<Enter>", on_dev_close_enter)
+        close_btn.bind("<Leave>", on_dev_close_leave)
         close_btn.pack(pady=(0, 20))
 
     def clear_all_data(self, dev_window):
         """Clear all guest data with confirmation."""
+        # Reset button appearance and remove focus (dialog causes state issues)
+        self.clear_all_btn.configure(
+            fg_color="transparent",
+            text_color="#dc3545",
+            border_color="#dc3545"
+        )
+        
+        # Force button to lose focus to prevent stuck state
+        dev_window.focus_set()  # Move focus to dev window
+        
         # Confirmation dialog
         confirm_window = ctk.CTkToplevel(dev_window)
         confirm_window.title("Confirm Clear All Data")
         confirm_window.geometry("300x300")
         confirm_window.transient(dev_window)
         confirm_window.grab_set()
+        
+        # Reset button state when confirmation dialog closes
+        def on_confirm_dialog_close():
+            self.clear_all_btn.configure(
+                fg_color="transparent",
+                text_color="#dc3545",
+                border_color="#dc3545"
+            )
+            confirm_window.destroy()
+            
+        confirm_window.protocol("WM_DELETE_WINDOW", on_confirm_dialog_close)
 
         # Center window
         confirm_window.update_idletasks()
@@ -2768,22 +3310,58 @@ class NFCApp(ctk.CTk):
             height=40,
             corner_radius=8,
             font=CTkFont(size=12, weight="bold"),
-            fg_color="#dc3545",
-            hover_color="#c82333"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#dc3545",
+            border_color="#dc3545"
         )
+        
+        # Add hover effects for YES DELETE ALL button
+        def on_confirm_delete_enter(event):
+            confirm_btn.configure(
+                fg_color="#dc3545",
+                text_color="#ffffff"
+            )
+            
+        def on_confirm_delete_leave(event):
+            confirm_btn.configure(
+                fg_color="transparent",
+                text_color="#dc3545"
+            )
+            
+        confirm_btn.bind("<Enter>", on_confirm_delete_enter)
+        confirm_btn.bind("<Leave>", on_confirm_delete_leave)
         confirm_btn.pack(side="left", padx=10)
 
         cancel_btn = ctk.CTkButton(
             button_frame,
             text="Cancel",
-            command=confirm_window.destroy,
+            command=on_confirm_dialog_close,
             width=100,
             height=40,
             corner_radius=8,
             font=self.fonts['button'],
-            fg_color="#6c757d",
-            hover_color="#5a6268"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#6c757d",
+            border_color="#6c757d"
         )
+        
+        # Add hover effects for Cancel button
+        def on_cancel_clear_enter(event):
+            cancel_btn.configure(
+                fg_color="#6c757d",
+                text_color="#ffffff"
+            )
+            
+        def on_cancel_clear_leave(event):
+            cancel_btn.configure(
+                fg_color="transparent",
+                text_color="#6c757d"
+            )
+            
+        cancel_btn.bind("<Enter>", on_cancel_clear_enter)
+        cancel_btn.bind("<Leave>", on_cancel_clear_leave)
         cancel_btn.pack(side="left", padx=10)
 
     def _execute_clear_all_data(self):
@@ -2815,6 +3393,7 @@ class NFCApp(ctk.CTk):
 
     def rewrite_tag(self):
         """Enter rewrite tag mode."""
+        self._restart_settings_timer()  # Restart timer on button interaction
         self.logger.info("User clicked Rewrite Tag button")
         # Check NFC connection first
         if not self._nfc_connected:
@@ -2825,6 +3404,7 @@ class NFCApp(ctk.CTk):
         self.is_scanning = False
 
         self.settings_visible = False
+        self._cancel_settings_timer()
         # Clear search field when closing settings
         self.clear_search()
         self.is_rewrite_mode = True
@@ -2840,6 +3420,8 @@ class NFCApp(ctk.CTk):
         if station == self.current_station:
             if self.settings_visible:
                 self.settings_visible = False
+                # Cancel auto-close timer
+                self._cancel_settings_timer()
                 # Clear search field when closing settings
                 self.clear_search()
                 self.update_settings_button()
@@ -2862,6 +3444,8 @@ class NFCApp(ctk.CTk):
         # Close settings if open
         if self.settings_visible:
             self.settings_visible = False
+            # Cancel auto-close timer
+            self._cancel_settings_timer()
             # Clear search field when closing settings
             self.clear_search()
             self.update_settings_button()
@@ -2885,6 +3469,12 @@ class NFCApp(ctk.CTk):
         # Set checkpoint mode: Reception has it active, others don't
         self.is_checkpoint_mode = (station == "Reception")
 
+        # Update station toggle switch text if in single station mode
+        if not self.show_all_stations:
+            self.station_view_switch.configure(text=f"{station} Only")
+            # Update table structure to refresh column headers
+            self._update_table_structure()
+
         # Update button highlighting
         self.update_station_buttons()
 
@@ -2905,23 +3495,26 @@ class NFCApp(ctk.CTk):
         """Update station button styling to highlight current selection."""
         for station, btn in self.station_buttons.items():
             if station == self.current_station:
-                # Highly highlighted selected station with border and glow effect
+                # Selected station: filled with border
                 btn.configure(
                     fg_color="#ff6b35",
-                    hover_color="#e55a2b",
+                    hover_color="#e55a2b", 
                     text_color="white",
-                    border_color="#fff",
-                    border_width=3
+                    border_color="#ff6b35",
+                    border_width=2
                 )
             else:
-                # Normal button styling
+                # Normal state: outline only with colored text
+                # Hover: filled background with dark text
                 btn.configure(
-                    fg_color="#3b82f6",
-                    hover_color="#2563eb",
-                    text_color="white",
+                    fg_color="transparent",
+                    hover_color="#3b82f6",
+                    text_color="#3b82f6",
                     border_color="#3b82f6",
                     border_width=2
                 )
+                # Note: CustomTkinter doesn't support hover text color directly
+                # The hover effect will show blue background with blue text (still readable)
     
     def _check_and_refresh_stations(self):
         """Check if new stations were added to Google Sheets and refresh UI."""
@@ -2978,8 +3571,31 @@ class NFCApp(ctk.CTk):
                 height=50,
                 corner_radius=12,
                 font=CTkFont(size=15, weight="bold"),
-                border_width=2
+                border_width=2,
+                fg_color="transparent",  # No fill by default
+                text_color="#3b82f6",   # Blue text color
+                border_color="#3b82f6"  # Blue border
+                # hover_color removed - handled by custom events
             )
+            
+            # Add hover text color control
+            def on_enter(event, button=btn, station_name=station):
+                if station_name != self.current_station:  # Only for non-selected buttons
+                    button.configure(
+                        fg_color="#3b82f6",      # Blue fill on hover
+                        text_color="#212121"     # Dark grey text on hover
+                    )
+            
+            def on_leave(event, button=btn, station_name=station):
+                if station_name != self.current_station:  # Only for non-selected buttons
+                    button.configure(
+                        fg_color="transparent",  # Back to transparent
+                        text_color="#3b82f6"     # Back to blue text
+                    )
+            
+            btn.bind("<Enter>", on_enter)
+            btn.bind("<Leave>", on_leave)
+            
             btn.pack(side="left", padx=3)
             self.station_buttons[station] = btn
             
@@ -3040,19 +3656,129 @@ class NFCApp(ctk.CTk):
         if self.checkin_buttons_visible:
             self.manual_checkin_btn.configure(
                 text="Cancel Manual Check-in",
-                fg_color="#6c757d",
-                hover_color="#a86f7d"
+                border_width=2,
+                fg_color="transparent",
+                text_color="#6c757d",
+                border_color="#6c757d"
             )
         else:
             self.manual_checkin_btn.configure(
                 text="Manual Check-in",
-                fg_color="#ff9800",
-                hover_color="#f57c00"
+                border_width=2,
+                fg_color="transparent",
+                text_color="#ff9800",
+                border_color="#ff9800"
             )
 
         # Refresh guest table to show/hide check-in buttons
         if self.guest_list_visible:
             self._update_guest_table(self.guests_data)
+
+    def toggle_station_view(self):
+        """Toggle between all stations and current station only view."""
+        # Get state from switch (True = All Stations, False = Single Station)
+        self.show_all_stations = self.station_view_switch.get()
+        
+        # Update switch text based on state
+        if self.show_all_stations:
+            self.station_view_switch.configure(text="All Stations")
+        else:
+            self.station_view_switch.configure(text=f"{self.current_station} Only")
+        
+        # Update table structure (headers and columns)
+        self._update_table_structure()
+        
+        # Refresh table to show/hide columns and update row coloring
+        if self.guest_list_visible:
+            self._update_guest_table(self.guests_data)
+
+    def _update_table_structure(self):
+        """Update table columns and headers based on current station view."""
+        available_stations = self._get_filtered_stations_for_view()
+        
+        # Update column configuration for both trees
+        columns = ("id", "first", "last") + tuple(station.lower() for station in available_stations)
+        
+        for tree in [self.summary_tree, self.guest_tree]:
+            # Configure the tree with new columns
+            tree.configure(columns=columns)
+            
+            # Configure fixed column headers and widths
+            tree.heading("id", text="Guest ID", anchor="w")
+            tree.heading("first", text="First Name", anchor="w")
+            tree.heading("last", text="Last Name", anchor="w")
+            
+            tree.column("id", width=80, minwidth=60, anchor="w")
+            tree.column("first", width=150, minwidth=100, anchor="w")
+            tree.column("last", width=150, minwidth=100, anchor="w")
+            
+            # Configure station columns with responsive sizing
+            for station in available_stations:
+                station_key = station.lower()
+                tree.heading(station_key, text=station, anchor="center")
+                
+                # Make single station column larger when in single station mode
+                if len(available_stations) == 1:
+                    tree.column(station_key, width=200, minwidth=150, anchor="center")
+                else:
+                    tree.column(station_key, width=120, minwidth=80, anchor="center")
+
+    def _get_filtered_stations_for_view(self):
+        """Get stations list based on current view mode (all stations vs current station only)."""
+        try:
+            all_stations = self._get_stations_cached()
+        except:
+            all_stations = self.config['stations']
+        
+        if self.show_all_stations:
+            return all_stations
+        else:
+            # Return only current station
+            return [self.current_station] if self.current_station in all_stations else [self.current_station]
+
+    def _is_guest_complete_all_stations(self, guest_id, available_stations, item_values):
+        """Check if guest has check-ins at all stations (original logic)."""
+        # Get local check-ins for this guest
+        local_checkins = self.tag_manager.get_all_local_check_ins().get(guest_id, {})
+        
+        # Station columns start at index 3 (after id, first, last)
+        for i, station in enumerate(available_stations):
+            col_index = i + 3
+            station_lower = station.lower()
+            
+            # Check tree value first
+            tree_has_checkin = False
+            if col_index < len(item_values):
+                value = item_values[col_index]
+                # A check-in exists if it starts with ✓ or has actual timestamp data
+                tree_has_checkin = value.startswith("✓") or (value not in ["-", "", "Check-in"])
+            
+            # Check local queue
+            local_has_checkin = station_lower in local_checkins
+            
+            # If neither tree nor local has check-in, not fully checked in
+            if not tree_has_checkin and not local_has_checkin:
+                return False
+        
+        return True
+
+    def _is_guest_complete_current_station(self, guest_id, item_values):
+        """Check if guest has check-in at current station only."""
+        # Get local check-ins for this guest
+        local_checkins = self.tag_manager.get_all_local_check_ins().get(guest_id, {})
+        current_station_lower = self.current_station.lower()
+        
+        # Find current station column (always at index 3 in single-station view)
+        if len(item_values) > 3:
+            value = item_values[3]
+            # Check tree value
+            tree_has_checkin = value.startswith("✓") or (value not in ["-", "", "Check-in"])
+            # Check local queue
+            local_has_checkin = current_station_lower in local_checkins
+            
+            return tree_has_checkin or local_has_checkin
+        
+        return False
 
     def on_sync_complete(self):
         """Called when background sync completes - refresh UI."""
@@ -3122,7 +3848,7 @@ class NFCApp(ctk.CTk):
 
         # Get dynamic stations for summary row
         try:
-            available_stations = self._get_stations_cached()
+            available_stations = self._get_filtered_stations_for_view()
         except:
             available_stations = self.config['stations']
 
@@ -3140,7 +3866,7 @@ class NFCApp(ctk.CTk):
             # Get dynamic stations
             # Use cached stations for table population
             try:
-                available_stations = self._get_stations_cached()
+                available_stations = self._get_filtered_stations_for_view()
             except:
                 available_stations = self.config['stations']
             
@@ -3204,8 +3930,27 @@ class NFCApp(ctk.CTk):
 
     def _add_summary_row(self, guests, available_stations, local_check_ins):
         """Add a summary row showing checked-in counts per station."""
-        # Build summary values: first 3 columns are empty
-        summary_values = ["", "", ""]
+        # Build summary values: show total guests in first column, other columns empty
+        total_guests = len(guests)
+        
+        # In single station mode, also show unchecked count
+        if not self.show_all_stations and len(available_stations) == 1:
+            # Calculate unchecked count for the single station
+            station_key = available_stations[0].lower()
+            checked_count = 0
+            
+            for guest in guests:
+                sheets_time = guest.get_check_in_time(station_key)
+                local_time = local_check_ins.get(guest.original_id, {}).get(station_key)
+                
+                if sheets_time or local_time:
+                    checked_count += 1
+            
+            unchecked_count = total_guests - checked_count
+            summary_values = [f"{total_guests} guests ({unchecked_count} unchecked)", "", ""]
+        else:
+            # All stations mode - just show total guests
+            summary_values = [f"{total_guests} guests", "", ""]
         
         # Calculate checked-in count for each station
         for station in available_stations:
@@ -3220,8 +3965,8 @@ class NFCApp(ctk.CTk):
                 if sheets_time or local_time:
                     checked_in_count += 1
             
-            # Add count in format "checked_in / total"
-            summary_values.append(f"{checked_in_count} / {len(guests)}")
+            # Add count - just the checked in number
+            summary_values.append(str(checked_in_count))
         
         # Clear and add to fixed summary tree
         for item in self.summary_tree.get_children():
@@ -3229,11 +3974,11 @@ class NFCApp(ctk.CTk):
         
         summary_item = self.summary_tree.insert("", "end", values=summary_values, tags=["summary"])
         
-        # Configure summary row styling to match header (use same font as main tree)
-        self.summary_tree.tag_configure("summary", background="#323232", foreground="white", font=("TkFixedFont", 12, "bold"))
+        # Configure summary row styling - 1 size larger than header
+        self.summary_tree.tag_configure("summary", background="#323232", foreground="white", font=("TkFixedFont", 14, "bold"))
 
     def _sort_by_lastname(self):
-        """Sort guest list by Last Name A-Ö permanently."""
+        """Sort guest list by Last Name A-Ö"""
         items = self.guest_tree.get_children('')
         
         if not items:
@@ -3264,15 +4009,50 @@ class NFCApp(ctk.CTk):
             
         # Get dynamic stations
         try:
-            available_stations = self._get_stations_cached()
+            available_stations = self._get_filtered_stations_for_view()
         except:
             available_stations = self.config['stations']
         
-        # Build new summary values
-        summary_values = ["", "", ""]
+        # Build new summary values: show total guests in first column, other columns empty
+        total_guests = len(guest_items)
         
         # Get local check-ins for current counts
         local_check_ins = self.tag_manager.get_all_local_check_ins()
+        
+        # In single station mode, also show unchecked count
+        if not self.show_all_stations and len(available_stations) == 1:
+            # Calculate unchecked count for the single station
+            station_key = available_stations[0].lower()
+            checked_count = 0
+            
+            for guest_item in guest_items:
+                guest_values = self.guest_tree.item(guest_item)['values']
+                if len(guest_values) >= 3:
+                    guest_id = int(guest_values[0])
+                    
+                    # Find the station column index
+                    station_col_index = None
+                    for i, col_station in enumerate(available_stations):
+                        if col_station.lower() == station_key:
+                            station_col_index = i + 3  # +3 for id, first, last columns
+                            break
+                    
+                    if station_col_index and station_col_index < len(guest_values):
+                        # Check tree value
+                        tree_value = guest_values[station_col_index]
+                        tree_has_checkin = tree_value not in ["-", "", "Check-in"]
+                        
+                        # Check local queue
+                        local_has_checkin = local_check_ins.get(guest_id, {}).get(station_key)
+                        
+                        if tree_has_checkin or local_has_checkin:
+                            checked_count += 1
+            
+            unchecked_count = total_guests - checked_count
+            summary_values = [f"{total_guests} guests ({unchecked_count} unchecked)", "", ""]
+        else:
+            # All stations mode - just show total guests
+            summary_values = [f"{total_guests} guests", "", ""]
         
         # Calculate checked-in count for each station based on current tree values
         for station in available_stations:
@@ -3302,8 +4082,8 @@ class NFCApp(ctk.CTk):
                         if tree_has_checkin or local_has_checkin:
                             checked_in_count += 1
             
-            # Add count in format "checked_in / total"
-            summary_values.append(f"{checked_in_count} / {len(guest_items)}")
+            # Add count - just the checked in number
+            summary_values.append(str(checked_in_count))
         
         # Update the summary tree
         summary_items = self.summary_tree.get_children('')
@@ -3344,7 +4124,13 @@ class NFCApp(ctk.CTk):
     def _auto_clear_id_field(self):
         """Auto-clear the guest ID field."""
         if hasattr(self, 'id_entry'):
-            self.id_entry.delete(0, 'end')
+            try:
+                # Check if the widget still exists and is valid
+                if self.id_entry.winfo_exists():
+                    self.id_entry.delete(0, 'end')
+            except (AttributeError, tk.TclError):
+                # Widget was destroyed, ignore the error
+                pass
 
     def _check_internet_periodically(self):
         """Lightweight periodic internet check that updates status only."""
@@ -3408,6 +4194,7 @@ class NFCApp(ctk.CTk):
     def refresh_guest_data(self, user_initiated=True):
         """Refresh guest data from Google Sheets."""
         if user_initiated:
+            self._restart_settings_timer()  # Restart timer on button interaction
             self.logger.info("User clicked Refresh Guest Data button")
             
         # Quick internet check (no logging for performance)
@@ -3495,7 +4282,7 @@ class NFCApp(ctk.CTk):
 
         # Get dynamic stations for summary row
         try:
-            available_stations = self._get_stations_cached()
+            available_stations = self._get_filtered_stations_for_view()
         except:
             available_stations = self.config['stations']
 
@@ -3516,7 +4303,7 @@ class NFCApp(ctk.CTk):
             # Get dynamic stations
             # Use cached stations for table population
             try:
-                available_stations = self._get_stations_cached()
+                available_stations = self._get_filtered_stations_for_view()
             except:
                 available_stations = self.config['stations']
             
@@ -3576,7 +4363,7 @@ class NFCApp(ctk.CTk):
 
         # Re-configure tags after refresh
         self.guest_tree.tag_configure("checkin_hover", background="#ff9800", foreground="black")
-        self.guest_tree.tag_configure("complete", background="#4CAF50", foreground="black")
+        self.guest_tree.tag_configure("complete", background="#538C54", foreground="black")
         self.guest_tree.tag_configure("odd", background="#2b2b2b")
         self.guest_tree.tag_configure("even", background="#353535")
 
@@ -3642,6 +4429,11 @@ class NFCApp(ctk.CTk):
         thread.daemon = True
         thread.start()
 
+    def _on_search_change(self):
+        """Handle search field changes - restart timer and filter list."""
+        self._restart_settings_timer()  # Restart timer on search interaction
+        self.filter_guest_list()
+
     def clear_search(self):
         """Clear the search field."""
         if hasattr(self, 'search_var'):
@@ -3668,7 +4460,7 @@ class NFCApp(ctk.CTk):
 
         # Get dynamic stations for summary row
         try:
-            available_stations = self._get_stations_cached()
+            available_stations = self._get_filtered_stations_for_view()
         except:
             available_stations = self.config['stations']
 
@@ -3880,6 +4672,12 @@ class NFCApp(ctk.CTk):
                         # For clears, we can still use direct API since they're less frequent
                         self.sheets_service.mark_attendance(int(guest_id), station_name, "")
                         self.logger.info(f"Cleared check-in for guest {guest_id} at {station_name}")
+                        
+                        # Update local data immediately to prevent reappearing when toggling views
+                        for guest in self.guests_data:
+                            if guest.original_id == int(guest_id):
+                                guest.check_ins[station_name.lower()] = None
+                                break
                 except Exception as e:
                     self.logger.error(f"Error updating check-in: {e}")
             
@@ -3961,6 +4759,7 @@ class NFCApp(ctk.CTk):
 
         self.is_rewrite_mode = False
         self.settings_visible = False
+        self._cancel_settings_timer()
         # Clear search field when closing settings
         self.clear_search()
         self.is_registration_mode = (self.current_station == "Reception")
@@ -4055,8 +4854,15 @@ class NFCApp(ctk.CTk):
             self._rewrite_check_operation_active = False
 
             if not tag:
+                # Check what type of error occurred for better user feedback
+                error_type = self.nfc_service.get_last_error_type()
                 self.after(0, self._enable_rewrite_ui)
-                self.after(0, self.update_status, "No tag detected", "error")
+                if error_type == 'timeout':
+                    self.after(0, self.update_status, "No tag detected", "error")
+                elif error_type in ('connection_failed', 'read_failed'):
+                    self.after(0, self.update_status, "Failed to read tag - try again", "error")
+                else:
+                    self.after(0, self.update_status, "No tag detected", "error")
                 # Release operation lock on failure
                 self.after(0, self._release_rewrite_lock)
                 return
@@ -4182,9 +4988,27 @@ class NFCApp(ctk.CTk):
             width=120,
             height=45,
             font=self.fonts['button'],
-            fg_color="#ff9800",
-            hover_color="#f57c00"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#ff9800",
+            border_color="#ff9800"
         )
+        
+        # Add hover effects for Rewrite button  
+        def on_rewrite_confirm_enter(event):
+            rewrite_btn.configure(
+                fg_color="#ff9800",
+                text_color="#212121"
+            )
+            
+        def on_rewrite_confirm_leave(event):
+            rewrite_btn.configure(
+                fg_color="transparent",
+                text_color="#ff9800"
+            )
+            
+        rewrite_btn.bind("<Enter>", on_rewrite_confirm_enter)
+        rewrite_btn.bind("<Leave>", on_rewrite_confirm_leave)
         rewrite_btn.pack(side="left", padx=10)
 
         def cancel_rewrite():
@@ -4202,9 +5026,27 @@ class NFCApp(ctk.CTk):
             width=120,
             height=45,
             font=self.fonts['button'],
-            fg_color="#6c757d",
-            hover_color="#5a6268"
+            border_width=2,
+            fg_color="transparent",
+            text_color="#6c757d",
+            border_color="#6c757d"
         )
+        
+        # Add hover effects for Cancel rewrite button
+        def on_cancel_rewrite_enter(event):
+            cancel_btn.configure(
+                fg_color="#6c757d",
+                text_color="#ffffff"
+            )
+            
+        def on_cancel_rewrite_leave(event):
+            cancel_btn.configure(
+                fg_color="transparent",
+                text_color="#6c757d"
+            )
+            
+        cancel_btn.bind("<Enter>", on_cancel_rewrite_enter)
+        cancel_btn.bind("<Leave>", on_cancel_rewrite_leave)
         cancel_btn.pack(side="left", padx=10)
 
     def _proceed_with_direct_rewrite(self, guest_id: int, tag):
@@ -4309,7 +5151,13 @@ class NFCApp(ctk.CTk):
         if item and column:
             column_index = int(column.replace('#', '')) - 1
             # Station columns start at index 3 (after id, first, last)
-            if column_index >= 3 and column_index < 3 + len(self.config['stations']):
+            # Get dynamic stations for current view
+            try:
+                available_stations = self._get_filtered_stations_for_view()
+            except:
+                available_stations = self.config['stations']
+                
+            if column_index >= 3 and column_index < 3 + len(available_stations):
                 values = self.guest_tree.item(item, "values")
                 if len(values) > column_index and values[column_index] == "Check-in":
                     # Apply hover styling
@@ -4351,20 +5199,21 @@ class NFCApp(ctk.CTk):
         if not item or not column:
             return
 
-        # Skip summary row (first row in tree)
-        all_items = self.guest_tree.get_children()
-        if all_items and item == all_items[0]:
-            return
-
         column_index = int(column.replace('#', '')) - 1
         values = self.guest_tree.item(item, "values")
         
         # Station columns start at index 3 (after id, first, last)
-        if column_index >= 3 and column_index < 3 + len(self.config['stations']):
+        # Get dynamic stations for current view
+        try:
+            available_stations = self._get_filtered_stations_for_view()
+        except:
+            available_stations = self.config['stations']
+            
+        if column_index >= 3 and column_index < 3 + len(available_stations):
             # Only proceed if it says "Check-in"
             if len(values) > column_index and values[column_index] == "Check-in":
                 guest_id = int(values[0])  # Ensure guest_id is int
-                station = self.config['stations'][column_index - 3]
+                station = available_stations[column_index - 3]
 
                 # Provide immediate visual feedback in cell
                 import datetime
@@ -4419,6 +5268,9 @@ class NFCApp(ctk.CTk):
 
             if result:
                 self.after(0, self.update_status, f"✓ Checked in {result['guest_name']} at {station}", "success")
+                # Auto-close manual check-in mode after successful check-in
+                if self.checkin_buttons_visible:
+                    self.after(0, self.toggle_manual_checkin)
                 # Delay refresh to ensure status is visible for minimum 2s
                 self.after(2500, lambda: self.refresh_guest_data(user_initiated=False))
             else:

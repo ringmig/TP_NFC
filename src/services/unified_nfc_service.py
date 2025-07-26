@@ -107,6 +107,17 @@ class UnifiedNFCService:
         if self.backend_service:
             self.backend_service.read_tag_async(callback, timeout)
     
+    def get_last_error_type(self) -> Optional[str]:
+        """
+        Get the type of the last error that occurred.
+        
+        Returns:
+            str: 'timeout', 'connection_failed', 'read_failed', or None if no error
+        """
+        if self.backend_service and hasattr(self.backend_service, 'get_last_error_type'):
+            return self.backend_service.get_last_error_type()
+        return None
+    
     def write_data_to_tag(self, tag_uid: str, data: str) -> bool:
         """Write data to NFC tag."""
         if not self.backend_service:
