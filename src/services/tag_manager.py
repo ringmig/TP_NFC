@@ -5,7 +5,7 @@ Tag manager service for coordinating NFC and Google Sheets operations.
 """
 
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from datetime import datetime
 import json
 from pathlib import Path
@@ -364,12 +364,38 @@ class TagManager:
             'timestamp': timestamp
         }
 
-    def get_tag_info(self, tag_uid: str) -> Optional[Dict[str, any]]:
-        """Get information about a registered tag."""
+    def get_tag_info(self, tag_uid: str, guests_data: List = None) -> Optional[Dict[str, any]]:
+        """Get information about a registered tag using local data for instant response."""
         if tag_uid not in self.tag_registry:
             return None
 
         original_id = self.tag_registry[tag_uid]
+        
+        # First try to use provided in-memory guest data (from TreeView)
+        if guests_data:
+            for guest in guests_data:
+                if guest.original_id == original_id:
+                    # Found in local memory - instant response!
+                    self.logger.debug(f"Tag info retrieved from memory for guest {guest.full_name}")
+                    
+                    # Get check-ins including any pending local ones
+                    check_ins = guest.check_ins.copy()
+                    
+                    # Also check for any pending check-ins in the queue
+                    local_check_ins = self.check_in_queue.get_local_check_ins(original_id)
+                    for station, time in local_check_ins.items():
+                        if not check_ins.get(station):
+                            check_ins[station] = time
+                    
+                    return {
+                        'tag_uid': tag_uid,
+                        'original_id': original_id,
+                        'guest_name': guest.full_name,
+                        'check_ins': check_ins
+                    }
+        
+        # Fallback to API call only if guest not found in memory
+        self.logger.info(f"Guest {original_id} not in memory, falling back to API")
         guest = self.sheets_service.find_guest_by_id(original_id)
 
         if guest:

@@ -51,7 +51,11 @@
 - [x] Tag-to-guest mapping system
 
 ### GUI Application
-- [x] Professional CustomTkinter interface with dark theme
+- [x] Professional CustomTkinter interface with **light/dark theme toggle** ✅
+- [x] **Complete Theme System**: Seamless switching between light and dark modes with persistence
+- [x] **Modern Button Design**: Outline + hover fill pattern across all UI elements
+- [x] **TreeView Theming**: Full light/dark support for guest list with borderless design
+- [x] **Manual Check-in Hover**: Orange hover effects for check-in buttons in both themes
 - [x] Configurable window display (normal/maximized/fullscreen)
 - [x] Station switching with visual button highlights
 - [x] Dynamic content modes (Registration/Checkpoint/Settings)

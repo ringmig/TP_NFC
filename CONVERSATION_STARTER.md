@@ -46,6 +46,13 @@
 4. **Station Toggle Column Headers**: Fixed headers not updating when switching stations in single mode
 5. **Check-in Deletion Persistence**: Fixed deleted check-ins reappearing when toggling station views by updating local cache immediately
 6. **Dynamic Station Support**: Fixed manual check-in buttons and hover effects not working for dynamically added stations from Google Sheets
+7. **Tag Info Performance & Flow**: 
+   - Eliminated duplicate Google Sheets API calls (was making 2 calls with same ID)
+   - Optimized to use in-memory TreeView data - instant response (<10ms) when guest is loaded
+   - API calls only as fallback when guest not in memory
+   - Fully offline compatible - works without internet using local tag registry and TreeView data
+   - Fixed accidental check-ins during tag info countdown with continuous NFC monitoring + conditional processing
+   - Added 2-second cooldown to prevent same tag from triggering both info display and check-in
 
 ### ✅ Completed - Guest List Enhancements:
 
@@ -81,5 +88,17 @@
 - **Bug-Free Operation**: All reported UI inconsistencies and state issues resolved
 
 **Technical Solution**: Fixed CustomTkinter's built-in blue hover behavior by using `hover=False` parameter combined with custom `<Enter>` and `<Leave>` event handlers for all modernized buttons.
+
+8. **Light/Dark Theme Toggle** (FULLY WORKING ✅):
+   - Replaced redundant "Refresh Guest List" button with theme toggle (auto-refresh already implemented)
+   - Added persistent light/dark mode switching with config save/restore
+   - **FIXED**: Complete TreeView theming system with proper initialization timing
+   - **FIXED**: Manual check-in orange hover functionality by studying working version (`/TP_NFC 0355/`)
+   - **Solution**: Hybrid approach - theme system for row colors, always-orange for hover
+   - **Key Insight**: Copied working version's brute-force hover approach instead of overcomplicating
+   - TreeView now properly themes: background, headers, rows, summary - all switch seamlessly
+   - Orange hover (`#ff9800`) works perfectly in both light and dark modes for manual check-in
+   - Button shows target mode (Light Mode when in dark, Dark Mode when in light)
+   - Clean borderless design with professional appearance
 
 **Pattern Established**: "Don't reinvent the wheel" - reuse existing working solutions instead of overcomplicating fixes.
