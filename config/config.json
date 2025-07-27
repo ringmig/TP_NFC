@@ -29,10 +29,10 @@
     "window_width": 1920,
     "window_height": 1080,
     "theme": "dark-blue",
-    "window_mode": "normal"
+    "window_mode": "maximized"
   },
   "developer": {
     "password": "8888"
   },
-  "theme": "light"
+  "theme": "dark"
 }

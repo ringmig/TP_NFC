@@ -10,17 +10,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    
 
 **STATE SYNCHRONIZATION:**
-   - After code changes: Update relevant tracking files
-     - Improvements.yaml: Remove completed items, add discovered issues and planned features
-     - State_Structure.yaml: Document new patterns or state changes
-     - PROJECT_STATUS.md: Update feature completion status
+   - After code changes: Update this CLAUDE.md.
    - Keep updates concise but complete
 
 **BOOTSTRAP HANDOFF:**
    - Final CLAUDE.md must enable next session to continue seamlessly
    - Include specific method names, line numbers, and error states
    - Document any locks, flags, or states that were in progress
-   - Prioritize "what was I doing" over "what I did"
+   - Prioritize tracing your steps, documenting what the last edit was.  
 
 ## Project Context
 **Project:** TP_NFC - NFC attendance tracking system with GUI  
@@ -29,7 +26,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `README.md` - Comprehensive project documentation with setup, configuration, architecture, and development guidelines
 - `src/gui/app.py` - Main GUI application (4200+ lines, CustomTkinter)
 
-## Current Session Summary (Recent UI Improvements & Bug Fixes)
+# Important Configuration
+
+**Desktop Configuration:**
+- `config/config.json` - Main application settings
+- `config/credentials.json` - Google API credentials (not in repo)
+- `config/tag_registry.json` - NFC tag mappings (auto-generated)
+- `config/check_in_queue.json` - Offline queue persistence
+
+**Android Configuration:**
+- `Android/buildozer.spec` - Android build configuration (API 30, NDK 25b)
+- `.github/workflows/android-build.yml` - Automated APK build pipeline
+- `Android/requirements.txt` - Python dependencies for mobile app
+
+
+## Last Session Summary (Recent UI Improvements & Bug Fixes)
 
 ### ✅ Completed This Session:
 
@@ -135,19 +146,7 @@ git add . && git commit -m "Update Android app" && git push origin master
 3. **Shared Services**: Google Sheets, Tag Manager, and Check-in Queue ported from desktop
 4. **Build System** (`.github/workflows/android-build.yml`): Docker-based buildozer with automated APK generation
 
-## Important Configuration
-
-**Desktop Configuration:**
-- `config/config.json` - Main application settings
-- `config/credentials.json` - Google API credentials (not in repo)
-- `config/tag_registry.json` - NFC tag mappings (auto-generated)
-- `config/check_in_queue.json` - Offline queue persistence
-
-**Android Configuration:**
-- `Android/buildozer.spec` - Android build configuration (API 30, NDK 25b)
-- `.github/workflows/android-build.yml` - Automated APK build pipeline
-- `Android/requirements.txt` - Python dependencies for mobile app
-
+#
 ## Development Guidelines
 
 1. **State Management**: The GUI uses complex state tracking. Always use `self.operation_in_progress` flag and proper cleanup

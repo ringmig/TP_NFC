@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import requests
+import webbrowser
 
 # Configure CustomTkinter
 ctk.set_appearance_mode("dark")
@@ -67,28 +68,35 @@ THEME_COLORS = {
     'treeview_odd_row_light': "#ededee",     # Alternating row color 1
     'treeview_even_row_light': "#ffffff",    # Alternating row color 2  
     'treeview_summary_light': "#dde0e4",     # Summary row background
+    'treeview_summary_text_light': "#ff9800",# Summary row text color
     'treeview_selected_bg_light': "#cce5ff", # Selected row background
     'treeview_selected_fg_light': "#004085", # Selected row text
     
     # Dark mode TreeView
     'treeview_bg_dark': "#212121",           # Main tree background
-    'treeview_text_dark': "white",           # Text color
+    'treeview_text_dark': "white",             # Text color
     'treeview_heading_dark': "#2b2b2b",      # Column headers
     'treeview_odd_row_dark': "#2b2b2b",      # Alternating row color 1
     'treeview_even_row_dark': "#353535",     # Alternating row color 2
     'treeview_summary_dark': "#323232",      # Summary row background
+    'treeview_summary_text_dark': "#ff9800", # Summary row text color
     'treeview_selected_bg_dark': "#4a4a4a",  # Selected row background
-    'treeview_selected_fg_dark': "white",    # Selected row text
+    'treeview_selected_fg_dark': "white",      # Selected row text
     
-    # TreeView special tags (theme-independent)
+    # TreeView hover row colors
     'treeview_complete_bg': "#4CAF50",       # Fully checked-in guests (green)
-    'treeview_complete_fg': "black",         # Text on complete background
+    'treeview_complete_fg': "black",           # Text on complete background
     'treeview_hover_bg': "#ff9800",          # Manual check-in hover (orange)
-    'treeview_hover_fg': "black",            # Text on hover background
+    'treeview_hover_fg': "black",              # Text on hover background
     
     # TreeView normal hover colors (theme-specific)
     'treeview_normal_hover_light': "#e3f2fd", # Light blue hover in light mode
-    'treeview_normal_hover_dark': "#424242",   # Grey hover in dark mode
+    'treeview_normal_hover_dark': "#424242",  # Grey hover in dark mode
+    
+    # TreeView font sizes
+    'treeview_data_font_size': 13,           # Guest list data cell font size
+    'treeview_header_font_size': 15,         # Guest list column header font size  
+    'treeview_summary_font_size': 16,        # Summary row font size
 }
 
 
@@ -107,14 +115,15 @@ class NFCApp(ctk.CTk):
     STATUS_PLEASE_ENTER_GUEST_ID = "Please enter a Guest ID first"
     STATUS_INVALID_ID_FORMAT = "Invalid ID format"
     STATUS_TAG_ALREADY_REGISTERED = "Tag already registered to {guest_name}"
+    STATUS_REFRESHING = "Refreshing..."
     
     # Sync status label constants
-    SYNC_STATUS_CONNECTED = "◉"
-    SYNC_STATUS_EMPTY = "⚠️ Sheets Empty"
-    SYNC_STATUS_RATE_LIMITED = "⚠️ Rate Limited"
-    SYNC_STATUS_NO_INTERNET = "⚠️ No Internet"
-    SYNC_STATUS_OFFLINE = "⚠️ Google Service Offline"
-    SYNC_STATUS_ERROR = "⚠️ Sync Failed"
+    SYNC_STATUS_CONNECTED = "Connected  ◉"
+    SYNC_STATUS_EMPTY = "Sheets Empty  ⚠️"
+    SYNC_STATUS_RATE_LIMITED = "Rate Limited  ⚠️"
+    SYNC_STATUS_NO_INTERNET = "No Internet  ✕"
+    SYNC_STATUS_OFFLINE = "Google Service Offline  ⚠️"
+    SYNC_STATUS_ERROR = "Sync Failed  ⚠️"
     
     # Internet connectivity test constants
     TEST_INTERNET_URL = "http://www.google.com"
@@ -193,18 +202,33 @@ class NFCApp(ctk.CTk):
         self._shutdown_event = threading.Event()
 
         # Window setup
+        self.withdraw()  # Hide window during initialization
         self.title(config['ui']['window_title'])
-        self.geometry(f"{config['ui']['window_width']}x{config['ui']['window_height']}")
+        
+        # Set initial geometry with centered position
+        width = config['ui']['window_width']
+        height = config['ui']['window_height']
+        self.update_idletasks()  # Ensure screen dimensions are available
+        
+        # Get actual screen dimensions
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # If window is larger than screen, use 90% of screen size
+        if width > screen_width or height > screen_height:
+            width = int(screen_width * 0.9)
+            height = int(screen_height * 0.9)
+            self.logger.info(f"Window size adjusted to fit screen: {width}x{height}")
+        
+        # Calculate center position
+        x = (screen_width // 2) - (width // 2)
+        y = (screen_height // 2) - (height // 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        
         self.minsize(800, 800)
 
         # Platform-specific fullscreen implementation
         self.setup_fullscreen()
-
-        # Center window (fallback if fullscreen doesn't work)
-        self.update_idletasks()
-        x = (self.winfo_screenwidth() // 2) - (self.winfo_width() // 2)
-        y = (self.winfo_screenheight() // 2) - (self.winfo_height() // 2)
-        self.geometry(f"+{x}+{y}")
 
         # Check critical files before UI initialization
         self.check_file_integrity()
@@ -246,12 +270,11 @@ class NFCApp(ctk.CTk):
         self.after(2500, self.start_nfc_connection_monitoring)
 
     def _grab_app_focus(self):
-        """Grab focus when app launches."""
+        """Show window and grab focus when app launches."""
         try:
-            self.lift()  # Bring window to front
-            self.focus_force()  # Force focus to the window
-            self.attributes('-topmost', True)  # Temporarily make topmost
-            self.after(1000, lambda: self.attributes('-topmost', False))  # Remove topmost after 1s
+            self.deiconify()  # Show window now that all UI is built
+            self.lift()  # Bring window to front on launch only
+            self.focus_force()  # Force focus to the window on launch only
         except Exception as e:
             self.logger.debug(f"Could not grab app focus: {e}")
 
@@ -555,11 +578,28 @@ class NFCApp(ctk.CTk):
                 self.logger.info("Linux using manual fullscreen geometry")
 
     def _set_normal_mode(self):
-        """Set window to normal size."""
+        """Set window to normal size and center it."""
         width = self.config['ui']['window_width']
         height = self.config['ui']['window_height']
-        self.geometry(f"{width}x{height}")
-        self.logger.info(f"Window set to normal size: {width}x{height}")
+        
+        # Update window to ensure we can get screen dimensions
+        self.update_idletasks()
+        
+        # Get actual screen dimensions
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        
+        # If window is larger than screen, use 90% of screen size
+        if width > screen_width or height > screen_height:
+            width = int(screen_width * 0.9)
+            height = int(screen_height * 0.9)
+        
+        # Calculate center position
+        x = (screen_width // 2) - (width // 2)
+        y = (screen_height // 2) - (height // 2)
+        
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.logger.info(f"Window set to normal size: {width}x{height} centered at {x},{y} on {screen_width}x{screen_height} screen")
 
     def toggle_fullscreen(self, event=None):
         """Toggle between fullscreen, maximized and normal window state."""
@@ -622,6 +662,14 @@ class NFCApp(ctk.CTk):
 
     def on_refresh_shortcut(self, event=None):
         """Handle refresh keyboard shortcut (Cmd+R / Ctrl+R)."""
+        # Clear search field and guest ID fields for user-initiated refresh
+        if hasattr(self, 'search_var'):
+            self.search_var.set("")
+        if hasattr(self, 'id_entry'):
+            self.id_entry.delete(0, 'end')
+        if hasattr(self, 'rewrite_id_entry'):
+            self.rewrite_id_entry.delete(0, 'end')
+        
         self.refresh_guest_data(user_initiated=True)
         return "break"  # Prevent default browser refresh behavior
 
@@ -980,10 +1028,10 @@ class NFCApp(ctk.CTk):
         # Add hover effects for manual checkin button
         def on_manual_checkin_enter(event):
             if self.checkin_buttons_visible:
-                # Grey theme for cancel state
+                # Blue theme for cancel state (matching logs close button)
                 self.manual_checkin_btn.configure(
-                    fg_color="#6c757d",
-                    text_color="#212121"
+                    fg_color="#3b82f6",
+                    text_color="#ffffff"
                 )
             else:
                 # Orange theme for normal state
@@ -994,10 +1042,10 @@ class NFCApp(ctk.CTk):
                 
         def on_manual_checkin_leave(event):
             if self.checkin_buttons_visible:
-                # Grey outline for cancel state
+                # Blue outline for cancel state (matching logs close button)
                 self.manual_checkin_btn.configure(
                     fg_color="transparent",
-                    text_color="#6c757d"
+                    text_color="#3b82f6"
                 )
             else:
                 # Orange outline for normal state
@@ -1701,11 +1749,11 @@ class NFCApp(ctk.CTk):
                 # Update button text based on current manual check-in state
                 if self.checkin_buttons_visible:
                     self.manual_checkin_btn.configure(
-                        text="Cancel Manual Check-in",
+                        text="✕ Cancel Manual Check-in",
                         border_width=2,
                         fg_color="transparent",
-                        text_color="#6c757d",
-                        border_color="#6c757d"
+                        text_color="#3b82f6",
+                        border_color="#3b82f6"
                     )
                 else:
                     self.manual_checkin_btn.configure(
@@ -3081,15 +3129,16 @@ class NFCApp(ctk.CTk):
         self._restart_settings_timer()  # Restart timer on button interaction
         self.logger.info("User opened log viewer")
         log_window = ctk.CTkToplevel(self)
-        log_window.title("Application Logs")
-        log_window.geometry("800x600")
+        log_window.title("Realtime Logs")
         log_window.transient(self)
+        log_window.withdraw()  # Hide window during setup
 
-        # Center window
-        log_window.update_idletasks()
-        x = (log_window.winfo_screenwidth() // 2) - (log_window.winfo_width() // 2)
-        y = (log_window.winfo_screenheight() // 2) - (log_window.winfo_height() // 2)
-        log_window.geometry(f"+{x}+{y}")
+        # Calculate center position
+        width, height = 800, 600
+        x = (log_window.winfo_screenwidth() // 2) - (width // 2)
+        y = (log_window.winfo_screenheight() // 2) - (height // 2)
+        log_window.geometry(f"{width}x{height}+{x}+{y}")
+        log_window.deiconify()  # Show window at correct position
 
         # Title
         title_label = ctk.CTkLabel(log_window, text="", font=self.fonts['heading'])
@@ -3254,9 +3303,8 @@ class NFCApp(ctk.CTk):
         
         password_window = ctk.CTkToplevel(self)
         password_window.title("")
-        password_window.geometry("300x300")
         password_window.transient(self)
-        password_window.grab_set()
+        password_window.withdraw()  # Hide window during setup
         
         # Reset button state when dialog closes
         def on_password_dialog_close():
@@ -3280,11 +3328,13 @@ class NFCApp(ctk.CTk):
             
         password_window.protocol("WM_DELETE_WINDOW", on_password_dialog_close)
 
-        # Center window
-        password_window.update_idletasks()
-        x = (password_window.winfo_screenwidth() // 2) - (password_window.winfo_width() // 2)
-        y = (password_window.winfo_screenheight() // 2) - (password_window.winfo_height() // 2)
-        password_window.geometry(f"+{x}+{y}")
+        # Calculate center position
+        width, height = 300, 300
+        x = (password_window.winfo_screenwidth() // 2) - (width // 2)
+        y = (password_window.winfo_screenheight() // 2) - (height // 2)
+        password_window.geometry(f"{width}x{height}+{x}+{y}")
+        password_window.grab_set()
+        password_window.deiconify()  # Show window at correct position
 
         # Title
         title_label = ctk.CTkLabel(password_window, text="Enter Password", font=self.fonts['heading'])
@@ -3389,32 +3439,68 @@ class NFCApp(ctk.CTk):
     def show_developer_mode(self):
         """Show developer mode interface."""
         dev_window = ctk.CTkToplevel(self)
-        dev_window.title("Developer Mode")
-        dev_window.geometry("300x300")
+        dev_window.title("")
         dev_window.resizable(False, False)
         dev_window.transient(self)
-        dev_window.grab_set()
+        dev_window.withdraw()  # Hide window during setup
         
         # Set up window close protocol to prevent stuck button states
         dev_window.protocol("WM_DELETE_WINDOW", lambda: dev_window.destroy())
 
-        # Center window
-        dev_window.update_idletasks()
-        x = (dev_window.winfo_screenwidth() // 2) - 150
-        y = (dev_window.winfo_screenheight() // 2) - 150
-        dev_window.geometry(f"+{x}+{y}")
+        # Calculate center position
+        width, height = 300, 280
+        x = (dev_window.winfo_screenwidth() // 2) - (width // 2)
+        y = (dev_window.winfo_screenheight() // 2) - (height // 2)
+        dev_window.geometry(f"{width}x{height}+{x}+{y}")
+        dev_window.deiconify()  # Show window at correct position
 
         # Main frame with padding
         main_frame = ctk.CTkFrame(dev_window)
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # Title
-        title_label = ctk.CTkLabel(main_frame, text="", font=self.fonts['heading'])
-        title_label.pack(pady=(20, 30))
+        # Container frame for buttons to center them vertically
+        button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        button_frame.pack(expand=True, fill="both")
+
+        # Google Sheets button
+        def open_google_sheets():
+            """Open Google Sheets in default browser."""
+            webbrowser.open("https://docs.google.com/spreadsheets/d/1x1HvvfYYp-SlhljTP5lebyZLAu21PVNEDTAe8w3SR-A/edit?usp=sharing")
+
+        sheets_btn = ctk.CTkButton(
+            button_frame,
+            text="Google Sheets",
+            command=open_google_sheets,
+            width=220,
+            height=50,
+            corner_radius=8,
+            font=self.fonts['button'],
+            border_width=2,
+            fg_color="transparent",
+            text_color="#28a745",
+            border_color="#28a745"
+        )
+        
+        # Add hover effects for Google Sheets button
+        def on_sheets_enter(event):
+            sheets_btn.configure(
+                fg_color="#28a745",
+                text_color="#ffffff"
+            )
+            
+        def on_sheets_leave(event):
+            sheets_btn.configure(
+                fg_color="transparent",
+                text_color="#28a745"
+            )
+            
+        sheets_btn.bind("<Enter>", on_sheets_enter)
+        sheets_btn.bind("<Leave>", on_sheets_leave)
+        sheets_btn.pack(pady=(20, 10), expand=True)
 
         # Clear All Data button
         self.clear_all_btn = ctk.CTkButton(
-            main_frame,
+            button_frame,
             text="Clear All Guest Data",
             command=lambda: self.clear_all_data(dev_window),
             width=220,
@@ -3442,7 +3528,7 @@ class NFCApp(ctk.CTk):
             
         self.clear_all_btn.bind("<Enter>", on_clear_all_enter)
         self.clear_all_btn.bind("<Leave>", on_clear_all_leave)
-        self.clear_all_btn.pack(pady=(0, 30))
+        self.clear_all_btn.pack(pady=(0, 10), expand=True)
 
         # Close button - modernized
         def close_dev_window():
@@ -3456,7 +3542,7 @@ class NFCApp(ctk.CTk):
             dev_window.destroy()
             
         close_btn = ctk.CTkButton(
-            main_frame,
+            button_frame,
             text="✕ Close",
             command=close_dev_window,
             width=120,
@@ -3486,7 +3572,10 @@ class NFCApp(ctk.CTk):
         close_btn.bind("<Enter>", on_dev_close_enter)
         close_btn.bind("<Leave>", on_dev_close_leave)
         
-        close_btn.pack(pady=(0, 20))
+        close_btn.pack(expand=True)
+        
+        # Make window modal after all content is created
+        dev_window.grab_set()
 
     def clear_all_data(self, dev_window):
         """Clear all guest data with confirmation."""
@@ -3902,11 +3991,11 @@ class NFCApp(ctk.CTk):
         # Update button text and color
         if self.checkin_buttons_visible:
             self.manual_checkin_btn.configure(
-                text="Cancel Manual Check-in",
+                text="✕ Cancel Manual Check-in",
                 border_width=2,
                 fg_color="transparent",
-                text_color="#6c757d",
-                border_color="#6c757d"
+                text_color="#3b82f6",
+                border_color="#3b82f6"
             )
             # Set orange hover when entering manual check-in mode
             self.guest_tree.tag_configure("checkin_hover", background=THEME_COLORS['treeview_hover_bg'], foreground=THEME_COLORS['treeview_hover_fg'])
@@ -3918,13 +4007,18 @@ class NFCApp(ctk.CTk):
                 text_color="#ff9800",
                 border_color="#ff9800"
             )
-            # Set light grey hover when returning to normal mode
-            normal_hover_bg = THEME_COLORS['treeview_normal_hover_light'] if self.is_light_mode else THEME_COLORS['treeview_normal_hover_dark']
-            self.guest_tree.tag_configure("checkin_hover", background=normal_hover_bg, foreground=THEME_COLORS['treeview_hover_fg'])
+            # Keep orange hover color when returning to normal mode
+            self.guest_tree.tag_configure("checkin_hover", background=THEME_COLORS['treeview_hover_bg'], foreground=THEME_COLORS['treeview_hover_fg'])
 
         # Refresh guest table to show/hide check-in buttons
         if self.guest_list_visible:
-            self._update_guest_table(self.guests_data)
+            # Check if there's an active search filter
+            if hasattr(self, 'search_var') and self.search_var.get().strip():
+                # Re-apply search filter to maintain filtered results
+                self.filter_guest_list()
+            else:
+                # No search active, show all guests
+                self._update_guest_table(self.guests_data)
 
     def toggle_station_view(self):
         """Toggle between all stations and current station only view."""
@@ -3947,7 +4041,13 @@ class NFCApp(ctk.CTk):
         # Refresh table to show/hide columns and update row coloring
         # Use silent refresh to preserve local check-ins and avoid interfering with sync
         if self.guest_list_visible:
-            self._update_guest_table_silent(self.guests_data)
+            # Check if there's an active search filter
+            if hasattr(self, 'search_var') and self.search_var.get().strip():
+                # Re-apply search filter to maintain filtered results
+                self.filter_guest_list()
+            else:
+                # No search active, show all guests
+                self._update_guest_table_silent(self.guests_data)
 
     def _update_table_structure(self):
         """Update table columns and headers based on current station view."""
@@ -4070,7 +4170,7 @@ class NFCApp(ctk.CTk):
     def update_sync_status(self, message: str, status_type: str = "normal"):
         """Update sync status label with appropriate color."""
         color_map = {
-            "normal": "#4CAF50",
+            "normal": "#3b82f6",
             "success": "#4CAF50",
             "warning": "#ff9800",
             "error": "#f44336"
@@ -4549,6 +4649,7 @@ class NFCApp(ctk.CTk):
             odd_row_bg = THEME_COLORS['treeview_odd_row_light']
             even_row_bg = THEME_COLORS['treeview_even_row_light']
             summary_bg = THEME_COLORS['treeview_summary_light']
+            summary_text = THEME_COLORS['treeview_summary_text_light']
             selected_bg = THEME_COLORS['treeview_selected_bg_light']
             selected_fg = THEME_COLORS['treeview_selected_fg_light']
         else:
@@ -4559,6 +4660,7 @@ class NFCApp(ctk.CTk):
             odd_row_bg = THEME_COLORS['treeview_odd_row_dark']
             even_row_bg = THEME_COLORS['treeview_even_row_dark']
             summary_bg = THEME_COLORS['treeview_summary_dark']
+            summary_text = THEME_COLORS['treeview_summary_text_dark']
             selected_bg = THEME_COLORS['treeview_selected_bg_dark']
             selected_fg = THEME_COLORS['treeview_selected_fg_dark']
 
@@ -4570,7 +4672,7 @@ class NFCApp(ctk.CTk):
                         borderwidth=0,
                         relief="flat",
                         rowheight=25,
-                        font=("TkFixedFont", 12, "normal"))
+                        font=("TkFixedFont", THEME_COLORS['treeview_data_font_size'], "normal"))
 
         # 2. Configure the Heading style
         style.configure("Treeview.Heading",
@@ -4578,7 +4680,7 @@ class NFCApp(ctk.CTk):
                         foreground=text_color,
                         borderwidth=0,
                         relief="flat",
-                        font=("TkFixedFont", 13, "bold"))
+                        font=("TkFixedFont", THEME_COLORS['treeview_header_font_size'], "bold"))
         
         # 2b. Disable hover effects for headers
         style.map("Treeview.Heading",
@@ -4617,11 +4719,12 @@ class NFCApp(ctk.CTk):
                             foreground=text_color,
                             fieldbackground=tree_bg,
                             rowheight=25,
-                            font=("TkFixedFont", 12, "normal"))
+                            font=("TkFixedFont", THEME_COLORS['treeview_data_font_size'], "normal"))
             self.summary_tree.configure(style="Summary.Treeview")
             
             # Also configure the tag for the summary row content
-            self.summary_tree.tag_configure("summary", background=summary_bg, foreground=text_color, font=("TkFixedFont", 14, "bold"))
+            summary_font_size = THEME_COLORS['treeview_summary_font_size']
+            self.summary_tree.tag_configure("summary", background=summary_bg, foreground=summary_text, font=("TkFixedFont", summary_font_size, "bold"))
 
         # 6. Refresh the data to apply new tags (this is more reliable than the old refresh method)
         if hasattr(self, 'guests_data'):
@@ -4658,10 +4761,10 @@ class NFCApp(ctk.CTk):
         if user_initiated:
             if self.settings_visible:
                 # In settings, show in main status bar
-                self.update_status("Refreshing...", "info")
+                self.update_status(self.STATUS_REFRESHING, "info")
             else:
                 # Normal mode, show in sync area
-                self.update_sync_status("Refreshing...", "normal")
+                self.update_sync_status(self.STATUS_REFRESHING, "normal")
 
         self._is_user_initiated_refresh = user_initiated
 
@@ -5702,8 +5805,8 @@ class NFCApp(ctk.CTk):
                 self.hovered_item = None
             return
         
-        # Get the item under the cursor with more precise detection
-        item = self._get_precise_item_at_cursor(event.y)
+        # Get the item under the cursor directly
+        item = self.guest_tree.identify_row(event.y)
 
         # If the hovered item has changed since the last event, update the styling
         if item != self.hovered_item:
@@ -5731,82 +5834,73 @@ class NFCApp(ctk.CTk):
             # Update the reference to the currently hovered item
             self.hovered_item = item
 
-    def _get_precise_item_at_cursor(self, y):
-        """Get the item under the cursor with precise boundary checking."""
-        # First, try the standard identify_row
-        item = self.guest_tree.identify_row(y)
-        
-        if item:
-            try:
-                # Get the item's bounding box to verify cursor is actually within it
-                bbox = self.guest_tree.bbox(item)
-                if bbox:  # bbox returns (x, y, width, height)
-                    item_top = bbox[1]
-                    item_bottom = bbox[1] + bbox[3]
-                    
-                    # Check if cursor Y is actually within this item's visual bounds
-                    if item_top <= y <= item_bottom:
-                        return item
-                    
-                    # If cursor is in the gap between rows, find the closest row
-                    item_center = item_top + (bbox[3] / 2)
-                    if y < item_center:
-                        # Cursor is in upper half of row or gap above
-                        # Check if there's a row above
-                        prev_item = self.guest_tree.prev(item)
-                        if prev_item:
-                            prev_bbox = self.guest_tree.bbox(prev_item)
-                            if prev_bbox:
-                                prev_bottom = prev_bbox[1] + prev_bbox[3]
-                                # If cursor is closer to previous row, use that
-                                if abs(y - prev_bottom) < abs(y - item_top):
-                                    return prev_item
-                        return item if y > item_top - 5 else None  # Small tolerance
-                    else:
-                        # Cursor is in lower half or gap below
-                        return item if y < item_bottom + 5 else None  # Small tolerance
-            except:
-                # If bbox fails, fall back to standard detection
-                pass
-        
-        return item
 
     def _on_scroll(self, event):
         """Handle scroll events by updating hover at current mouse position."""
+        # Clear any pending tooltip first since content has moved under mouse
+        self._clear_tooltip()
+        
+        # Use a very short delay to allow the treeview to process the scroll
+        # before we update the hover. This prevents lag and inaccuracy.
+        if hasattr(self, '_scroll_hover_job'):
+            self.after_cancel(self._scroll_hover_job)
+        
+        self._scroll_hover_job = self.after(1, self._update_hover_on_scroll)
+    
+    def _update_hover_on_scroll(self):
+        """Update the hover effect after a scroll event."""
         try:
-            # Clear any pending tooltip first since content has moved under mouse
-            self._clear_tooltip()
-            
-            # Get the current mouse position relative to the TreeView widget
-            # We need to convert from screen coordinates to widget coordinates
-            mouse_x = self.guest_tree.winfo_pointerx() - self.guest_tree.winfo_rootx()
-            mouse_y = self.guest_tree.winfo_pointery() - self.guest_tree.winfo_rooty()
-            
-            # Check if mouse is actually over the TreeView
-            if (0 <= mouse_x <= self.guest_tree.winfo_width() and 
-                0 <= mouse_y <= self.guest_tree.winfo_height()):
+            # Get mouse position relative to the Treeview
+            x = self.guest_tree.winfo_pointerx() - self.guest_tree.winfo_rootx()
+            y = self.guest_tree.winfo_pointery() - self.guest_tree.winfo_rooty()
+
+            # Identify the item directly under the cursor
+            new_item = self.guest_tree.identify_row(y)
+
+            # Update styling if the hovered item has changed
+            if new_item != self.hovered_item:
+                # Remove hover from the old item
+                if self.hovered_item:
+                    try:
+                        tags = list(self.guest_tree.item(self.hovered_item, "tags"))
+                        if "checkin_hover" in tags:
+                            tags.remove("checkin_hover")
+                            self.guest_tree.item(self.hovered_item, tags=tags)
+                    except tk.TclError:
+                        pass  # Item might have been deleted
+
+                # Apply hover to the new item
+                if new_item:
+                    try:
+                        # Only apply hover if not in manual check-in mode,
+                        # as that mode has its own button-specific hover.
+                        if not self.checkin_buttons_visible:
+                            tags = list(self.guest_tree.item(new_item, "tags"))
+                            if "checkin_hover" not in tags:
+                                tags.append("checkin_hover")
+                                self.guest_tree.item(new_item, tags=tags)
+                    except tk.TclError:
+                        pass # Item might have been deleted during a refresh
+
+                self.hovered_item = new_item
                 
-                # Create a synthetic event with the current mouse position
-                class SyntheticEvent:
-                    def __init__(self, x, y):
-                        self.x = x
-                        self.y = y
-                
-                synthetic_event = SyntheticEvent(mouse_x, mouse_y)
-                self._update_hover(synthetic_event)
-                
-                # Also re-evaluate tooltip for the new position after scroll
-                item = self.guest_tree.identify("item", mouse_x, mouse_y)
-                column = self.guest_tree.identify("column", mouse_x, mouse_y)
-                self._handle_tooltip_motion(item, column, mouse_x, mouse_y)
-        except Exception as e:
-            # Silently handle any coordinate calculation errors
+            # Also re-evaluate tooltip for the new position after scroll
+            if new_item:
+                column = self.guest_tree.identify_column(x)
+                self._handle_tooltip_motion(new_item, column, x, y)
+        except Exception:
+            # Fail silently if coordinates are invalid during rapid scrolling
             pass
 
     def _handle_tooltip_motion(self, item, column, x, y):
         """Handle tooltip logic during mouse motion."""
         # Skip if no item
         if not item:
+            self._clear_tooltip()
+            return
+            
+        # Skip tooltips when manual check-in mode is active
+        if self.checkin_buttons_visible:
             self._clear_tooltip()
             return
             
