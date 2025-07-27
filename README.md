@@ -84,11 +84,12 @@ This is a complete, production-ready NFC attendance system with **3000+ lines of
 
 ### Prerequisites
 
-- **Python 3.9+** (3.11+ recommended)
 - **Git** for cloning the repository
 - **USB NFC Reader** (ACR122U recommended)
 - **NTAG213 Wristbands** for guest identification
 - **Google Account** with Sheets access
+
+> **Note**: Python and all dependencies are included! No external Python installation required.
 
 ### Installation
 
@@ -98,7 +99,7 @@ This is a complete, production-ready NFC attendance system with **3000+ lines of
    cd TP_NFC
    ```
 
-2. **Run the installation script:**
+2. **Run the one-time setup:**
    
    **Windows:**
    ```cmd
@@ -111,7 +112,7 @@ This is a complete, production-ready NFC attendance system with **3000+ lines of
    ./install.command
    ```
    
-   This creates a virtual environment and installs all dependencies.
+   This installs portable Python and all dependencies locally within the project folder.
 
 3. **Connect your NFC reader** via USB
 
@@ -120,8 +121,11 @@ This is a complete, production-ready NFC attendance system with **3000+ lines of
 ### Quick Start
 
 **Run the application:**
-- Windows: Double-click `start.bat`
-- macOS/Linux: Double-click `start.command`
+- **Windows**: Double-click `launchers/start.bat`
+- **macOS/Linux**: Double-click `launchers/start.command` (recommended for cleanest experience)
+
+**For development:**
+- Use `python3 run.py` in VS Code or terminal
 
 **Test your setup:**
 - NFC Reader: `tools/test_nfc.command`

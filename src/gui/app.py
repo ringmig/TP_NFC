@@ -65,7 +65,7 @@ THEME_COLORS = {
     'treeview_bg_light': "#ffffff",          # Main tree background
     'treeview_text_light': "#212529",        # Text color
     'treeview_heading_light': "#dde0e4",     # Column headers
-    'treeview_odd_row_light': "#ededee",     # Alternating row color 1
+    'treeview_odd_row_light': "#dde0e4",     # Alternating row color 1
     'treeview_even_row_light': "#ffffff",    # Alternating row color 2  
     'treeview_summary_light': "#dde0e4",     # Summary row background
     'treeview_summary_text_light': "#ff9800",# Summary row text color
@@ -78,7 +78,7 @@ THEME_COLORS = {
     'treeview_heading_dark': "#2b2b2b",      # Column headers
     'treeview_odd_row_dark': "#2b2b2b",      # Alternating row color 1
     'treeview_even_row_dark': "#353535",     # Alternating row color 2
-    'treeview_summary_dark': "#323232",      # Summary row background
+    'treeview_summary_dark': "#2b2b2b",      # Summary row background
     'treeview_summary_text_dark': "#ff9800", # Summary row text color
     'treeview_selected_bg_dark': "#4a4a4a",  # Selected row background
     'treeview_selected_fg_dark': "white",      # Selected row text
@@ -115,10 +115,10 @@ class NFCApp(ctk.CTk):
     STATUS_PLEASE_ENTER_GUEST_ID = "Please enter a Guest ID first"
     STATUS_INVALID_ID_FORMAT = "Invalid ID format"
     STATUS_TAG_ALREADY_REGISTERED = "Tag already registered to {guest_name}"
-    STATUS_REFRESHING = "Refreshing..."
+    STATUS_REFRESHING = "Refreshing.."
     
     # Sync status label constants
-    SYNC_STATUS_CONNECTED = "Connected  ◉"
+    SYNC_STATUS_CONNECTED = "Live  ◉"
     SYNC_STATUS_EMPTY = "Sheets Empty  ⚠️"
     SYNC_STATUS_RATE_LIMITED = "Rate Limited  ⚠️"
     SYNC_STATUS_NO_INTERNET = "No Internet  ✕"

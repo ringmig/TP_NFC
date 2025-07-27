@@ -40,35 +40,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `Android/requirements.txt` - Python dependencies for mobile app
 
 
-## Last Session Summary (Recent UI Improvements & Bug Fixes)
+## Last Session Summary (Portable Distribution System)
 
 ### ✅ Completed This Session:
 
-**11. Offline Data Caching & Auto-Refresh** (FULLY WORKING ✅):
-- **Cached Guest Data Loading**: Fixed offline mode to properly load and display cached guest data
-- **Bug Fix**: Removed internet connectivity blocking that prevented cached data access  
-- **Auto-Refresh on Connection Restore**: Automatically triggers `refresh_guest_data()` when internet is restored
-- **Status Message Fix**: Corrected "Loaded 0 guests" message showing when data loads successfully
-- **Background Monitoring**: 10-second internet connectivity checks with automatic data sync
+**13. Complete Portable Distribution System** (FULLY WORKING ✅):
+- **Windows Portable Python**: Embedded Python 3.13.5 installed locally in `portable_python/windows/`
+- **macOS Portable Setup**: Uses system Python 3.13 with all dependencies in local `portable_python/site-packages/`
+- **Self-Contained Project**: All dependencies now included within project folder - no external dependencies needed
+- **Multiple Launchers**: Clean launcher options in `launchers/` folder for different user preferences
+- **Developer Tools**: Simple `python3 run.py` command for VS Code development
 
-**12. Non-Interactive UI Elements** (FULLY WORKING ✅):
-- **Summary Row**: Made completely non-clickable and removed all hover effects
-- **TreeView Headers**: Removed hover color changes using ttk.Style mapping  
-- **Header Detection**: Added region detection to prevent hover effects on column headers
-- **Tooltip Timer Fix**: Proper tooltip timer cancellation during scrolling events
-- **Scroll-Safe Tooltips**: Re-evaluate tooltip position after scroll to prevent wrong-cell tooltips
+**Key Technical Implementation**:
+- **Portable Python Path Management**: `portable_python_path.py` automatically configures Python paths
+- **Local Dependency Installation**: Updated `install.command`/`install.bat` to install packages locally using `--target`
+- **Clean Launcher System**: `start.command` provides optimal user experience (28 lines, nohup approach)
+- **Cross-Platform Compatibility**: Windows uses embedded Python, macOS uses system Python with local packages
 
-**Key Technical Solutions**:
-- **Caching Fix**: Removed early return blocking to allow sheets service to handle offline scenarios
-- **Style Mapping**: Used `style.map("Treeview.Heading", background=[('active', heading_bg)])` to disable header hover
-- **Timer Management**: Added `_clear_tooltip()` to scroll handlers for proper tooltip lifecycle
+**Distribution Benefits**:
+- **Zero External Dependencies**: Everything needed is included in the project folder
+- **Easy Deployment**: Copy entire folder to any machine and run
+- **No Virtual Environment Needed**: Portable packages replace venv requirement
+- **Clean User Experience**: Double-click launchers work seamlessly
 
 ### Previous Major Achievements:
 - Complete modern button design system with outline + hover fill pattern
 - Light/dark theme toggle with full TreeView theming
 - Row hover system with selection elimination  
 - NFC status blinking alerts
-- Comprehensive bug fixes for button states and dialog interactions
+- Offline data caching with auto-refresh
+- Non-interactive UI elements (summary row, headers, tooltips)
 
 ## Project Overview
 
@@ -101,13 +102,16 @@ Key architectural decisions:
 ## Common Commands
 
 ```bash
-# Install dependencies (use platform-specific scripts)
-./install.command  # macOS
-./install.bat      # Windows
+# Setup portable distribution (one-time setup)
+./install.command  # macOS - installs all dependencies locally
+./install.bat      # Windows - installs all dependencies locally
 
-# Run the application
-./start.command    # macOS
-./start.bat        # Windows
+# Run the application (for end users)
+./launchers/start.command  # macOS - recommended, cleanest experience
+./launchers/start.bat      # Windows
+
+# Run the application (for development)
+python3 run.py                    # Simple launcher for VS Code/development
 
 # Run tests
 pytest
