@@ -13,7 +13,7 @@ This file provides guidance to Claude Code when working with the TP_NFC Android 
    - After Android changes: Update this Android/CLAUDE.md
    - Keep updates concise but complete with current build status
 
-## Current Session Summary (Android Studio Integration & Build Fixes)
+## Current Session Summary (GitHub Actions Build Trigger)
 
 ### ✅ Completed This Session:
 
@@ -30,15 +30,18 @@ This file provides guidance to Claude Code when working with the TP_NFC Android 
 - **App running correctly** on Android device/emulator
 - **ADB integration**: Scripts auto-detect ADB from `~/Library/Android/sdk/platform-tools/`
 
-**3. Build System Configuration** (IN PROGRESS 🔄):
+**3. Build System Configuration** (COMPLETED ✅):
 - **Identified Python 3.13 compatibility issue**: `jnius` errors with `long` type
 - **Root cause**: buildozer/python-for-android not fully compatible with Python 3.13
-- **Solution created**: Python 3.12 compatibility layer with dedicated build scripts
+- **Solution implemented**: 
+  - Installed Python 3.11 and 3.12 with virtual environments
+  - Created multiple build scripts for different approaches
+  - **Triggered GitHub Actions build** - Using working Docker-based workflow
 
 **Key Technical Solutions**:
 - **ADB Path Resolution**: Auto-detect Android Studio SDK ADB location
 - **Package Management**: Support both test and full app installations
-- **Build Environment**: Created Python 3.12 compatibility scripts
+- **GitHub Actions Build**: Using cloud-based Docker build for reliability
 - **Activity Detection**: Proper Android activity naming (`org.kivy.android.PythonActivity`)
 
 ## Project Structure
@@ -79,8 +82,8 @@ Android/
 - **Debug Workflow**: Logging and development tools
 
 ### 🔄 **In Progress:**
-- **Full TP_NFC Build**: Python 3.13 compatibility blocking build
-- **Python 3.12 Setup**: Solution scripts created, needs execution
+- **Full TP_NFC Build**: GitHub Actions workflow triggered - awaiting APK artifact
+- **Local Build**: Python compatibility issues resolved, but local buildozer still challenging
 
 ### ❌ **Known Issues:**
 - **Python 3.13 + buildozer**: `jnius` compile errors (`long` type undefined)
@@ -93,11 +96,10 @@ Android/
 - **Build spec**: `buildozer_full.spec` (TP NFC with all features)
 - **Python version**: 3.13 (causing build issues)
 
-### **Available Build Scripts:**
-1. **`build_full_app.sh`** - Full featured app (blocked by Python 3.13)
-2. **`build_simple.sh`** - Minimal working version (blocked by Python 3.13)  
-3. **`build_with_py312.sh`** - Python 3.12 compatibility build ⭐ **RECOMMENDED**
-4. **`setup_compatible_python.sh`** - Install Python 3.12 environment ⭐ **REQUIRED FIRST**
+### **Build Method:**
+- **GitHub Actions**: Push changes to master branch to trigger cloud build
+- **Local builds**: Not recommended due to Python/buildozer compatibility issues
+- **Docker**: Would work locally but requires Docker Desktop installation
 
 ### **APK Management:**
 - **Test APK**: `./install_apk.sh` (installs test_01.apk)

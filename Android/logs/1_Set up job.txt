@@ -1,0 +1,38 @@
+﻿2025-07-28T06:59:30.9939049Z Current runner version: '2.326.0'
+2025-07-28T06:59:30.9986480Z ##[group]Runner Image Provisioner
+2025-07-28T06:59:30.9987351Z Hosted Compute Agent
+2025-07-28T06:59:30.9987904Z Version: 20250711.363
+2025-07-28T06:59:30.9988510Z Commit: 6785254374ce925a23743850c1cb91912ce5c14c
+2025-07-28T06:59:30.9989211Z Build Date: 2025-07-11T20:04:25Z
+2025-07-28T06:59:30.9989766Z ##[endgroup]
+2025-07-28T06:59:30.9990366Z ##[group]Operating System
+2025-07-28T06:59:30.9990949Z Ubuntu
+2025-07-28T06:59:30.9991387Z 24.04.2
+2025-07-28T06:59:30.9991889Z LTS
+2025-07-28T06:59:30.9992324Z ##[endgroup]
+2025-07-28T06:59:30.9992806Z ##[group]Runner Image
+2025-07-28T06:59:30.9993305Z Image: ubuntu-24.04
+2025-07-28T06:59:30.9993875Z Version: 20250720.1.0
+2025-07-28T06:59:30.9994827Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20250720.1/images/ubuntu/Ubuntu2404-Readme.md
+2025-07-28T06:59:30.9996532Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20250720.1
+2025-07-28T06:59:30.9997832Z ##[endgroup]
+2025-07-28T06:59:30.9998931Z ##[group]GITHUB_TOKEN Permissions
+2025-07-28T06:59:31.0000953Z Contents: read
+2025-07-28T06:59:31.0001484Z Metadata: read
+2025-07-28T06:59:31.0002088Z Packages: read
+2025-07-28T06:59:31.0002583Z ##[endgroup]
+2025-07-28T06:59:31.0004786Z Secret source: Actions
+2025-07-28T06:59:31.0005858Z Prepare workflow directory
+2025-07-28T06:59:31.0328418Z Prepare all required actions
+2025-07-28T06:59:31.0368017Z Getting action download info
+2025-07-28T06:59:31.5034061Z ##[group]Download immutable action package 'actions/checkout@v4'
+2025-07-28T06:59:31.5035186Z Version: 4.2.2
+2025-07-28T06:59:31.5036396Z Digest: sha256:ccb2698953eaebd21c7bf6268a94f9c26518a7e38e27e0b83c1fe1ad049819b1
+2025-07-28T06:59:31.5037613Z Source commit SHA: 11bd71901bbe5b1630ceea73d27597364c9af683
+2025-07-28T06:59:31.5038730Z ##[endgroup]
+2025-07-28T06:59:31.9850682Z ##[group]Download immutable action package 'actions/upload-artifact@v4'
+2025-07-28T06:59:31.9851600Z Version: 4.6.2
+2025-07-28T06:59:31.9852444Z Digest: sha256:290722aa3281d5caf23d0acdc3dbeb3424786a1a01a9cc97e72f147225e37c38
+2025-07-28T06:59:31.9853464Z Source commit SHA: ea165f8d65b6e75b540449e92b4886f43607fa02
+2025-07-28T06:59:31.9854305Z ##[endgroup]
+2025-07-28T06:59:32.2321160Z Complete job name: build

@@ -1,52 +1,53 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-TP_NFC Android - Main entry point
+TP_NFC Android - Simple version for GitHub Actions build
 """
-
-import os
-import sys
-from pathlib import Path
-
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
 
 from kivy.app import App
-from kivy.lang import Builder
-from kivymd.app import MDApp
-from kivymd.theming import ThemableBehavior
-from kivymd.uix.screenmanager import MDScreenManager
-from kivymd.uix.screen import MDScreen
+from kivy.uix.label import Label
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
 
-from src.gui.screens.main_screen import MainScreen
-from src.services.config_service import ConfigService
-
-class TPNFCApp(MDApp):
-    """TP_NFC Android Application"""
-    
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.title = "TP NFC - Attendance Tracker"
-        
-        # Load configuration
-        self.config_service = ConfigService()
-        self.config = self.config_service.load_config()
-        
-        # Theme setup
-        self.theme_cls.theme_style = "Dark"
-        self.theme_cls.primary_palette = "Blue"
-        self.theme_cls.accent_palette = "Orange"
-        
+class TPNFCApp(App):
     def build(self):
-        """Build the application"""
-        # Create screen manager
-        sm = MDScreenManager()
+        # Main layout
+        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
         
-        # Add main screen
-        main_screen = MainScreen(name='main')
-        sm.add_widget(main_screen)
+        # Title
+        title = Label(
+            text='TP_NFC Android',
+            font_size='28sp',
+            size_hint_y=None,
+            height='60dp',
+            bold=True
+        )
         
-        return sm
+        # Status
+        self.status = Label(
+            text='NFC Attendance Tracker\n\nVersion 0.1\nGitHub Actions Build',
+            font_size='18sp',
+            halign='center',
+            valign='middle'
+        )
+        self.status.bind(size=self.status.setter('text_size'))
+        
+        # Button
+        button = Button(
+            text='Test Button',
+            size_hint_y=None,
+            height='50dp'
+        )
+        button.bind(on_press=self.on_button_press)
+        
+        # Add widgets
+        layout.add_widget(title)
+        layout.add_widget(self.status)
+        layout.add_widget(button)
+        
+        return layout
+    
+    def on_button_press(self, instance):
+        self.status.text = 'Button pressed!\n\nApp is working correctly.'
 
 if __name__ == '__main__':
     TPNFCApp().run()

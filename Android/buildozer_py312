@@ -1,4 +1,0 @@
-#!/bin/bash
-# Buildozer wrapper using Python 3.12
-export PYTHON_FOR_BUILD="/opt/homebrew/bin/python3.12"
-/opt/homebrew/bin/python3.12 -m buildozer "$@"
