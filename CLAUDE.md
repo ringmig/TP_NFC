@@ -1,212 +1,177 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## CRITICAL_BOOTSTRAP_PROTOCOL
 
-## STRICT OPERATIONAL PROTOCOL:
+LOAD_ORDER:
+1. Read this file completely
+2. Read `src/gui/app.py` to understand current implementation
+3. Check `config/config.json` for runtime configuration
 
-**BOOTSTRAP SEQUENCE:**
-   - First: Read CLAUDE.md to load project context and previous session state
-   - Second: Review any files mentioned in CLAUDE.md before proceeding
+STATE_PERSISTENCE:
+- Update this file after significant changes
+- Include specific line numbers and method names
+- Document in-progress operations and locks
+
+## PROJECT_CONTEXT
+
+PROJECT_NAME: TP_NFC
+PROJECT_TYPE: NFC attendance tracking system
+PRIMARY_LANGUAGE: Python 3.13.5
+GUI_FRAMEWORK: CustomTkinter
+PLATFORMS: Windows, macOS, Linux, Android
+
+FILE_STRUCTURE:
+```
+C:\src\git\TP_NFC\
+├── src/
+│   ├── gui/app.py [MAIN_GUI: 4200+ lines]
+│   ├── services/
+│   │   ├── unified_nfc_service.py [NFC_BACKEND_ABSTRACTION]
+│   │   ├── google_sheets_service.py [DATA_SYNC]
+│   │   ├── tag_manager.py [TAG_GUEST_MAPPING]
+│   │   └── check_in_queue.py [OFFLINE_QUEUE]
+│   └── models/
+├── python/ [WINDOWS_EMBEDDED_PYTHON_3.13.5]
+├── config/
+│   ├── config.json [RUNTIME_CONFIG]
+│   ├── tag_registry.json [TAG_DATA]
+│   └── check_in_queue.json [OFFLINE_DATA]
+└── launchers/
+    ├── start.bat [WINDOWS_LAUNCHER]
+    └── start.command [MACOS_LAUNCHER]
+```
+
+## RECENT_MODIFICATIONS
+
+LAST_SESSION_CHANGES:
+1. Guest name display feature (lines 1785-1800, 2360-2403 in app.py)
+   - METHOD: `_on_guest_id_change()` at line 2360
+   - OPTIMIZATION: Changed from `sheets_service.find_guest_by_id()` to `self.guests_data` loop
+   - PERFORMANCE: ~1000ms → ~5ms lookup time
+   - UI_LOCATION: Above ID entry field, 36pt font
+   - AUTO_CLEAR: Integrated with 15-second timer at line 4589
+
+2. Fixed auto-clear to include guest name (line 4597)
+   - METHOD: `_auto_clear_id_field()`
+   - ADDED: `self.safe_update_widget('guest_name_label', lambda w: w.configure(text=""))`
+
+3. UI positioning adjustments (lines 1793-1804)
+   - REMOVED: Empty instruction label that was pushing content up
+   - PADDING: `pady=(0, 25)` between name and ID field
+
+## CRITICAL_STATE_VARIABLES
+
+GLOBAL_STATE_FLAGS:
+- `self.operation_in_progress`: Mutex for preventing concurrent operations
+- `self._nfc_operation_lock`: Prevents NFC scanning during write operations
+- `self.is_registration_mode`: True at Reception station
+- `self.is_checkpoint_mode`: True for check-in scanning
+- `self.guests_data`: List[GuestRecord] - Cached guest data (397 entries typical)
+
+THREAD_SAFETY_REQUIREMENTS:
+- All UI updates from background threads MUST use `safe_update_widget()`
+- Background operations use `submit_background_task()`
+- NFC operations check `nfc_service.is_ready()` first
+
+## KEY_METHOD_SIGNATURES
+
+```python
+# Guest name display optimization (line 2360)
+def _on_guest_id_change(self, event=None):
+    # Uses self.guests_data instead of API call
+    # O(n) loop through ~397 guests
+
+# Background task submission (line 492)
+def submit_background_task(self, func, *args, **kwargs):
+    # Returns Future object
+    # Thread pool executor with 4 workers
+
+# Safe UI updates from threads (line 508)
+def safe_update_widget(self, widget_name, update_func, *args):
+    # Thread-safe widget updates
+    # Handles destroyed widgets gracefully
+```
+
+## OPERATIONAL_MODES
+
+STATION_MODES:
+1. Reception (default):
+   - is_registration_mode = True
+   - is_checkpoint_mode = True
+   - Shows ID entry + guest name + register button
    
+2. Other stations:
+   - is_registration_mode = False
+   - is_checkpoint_mode = True
+   - Shows only scanning status
 
-**STATE SYNCHRONIZATION:**
-   - After code changes: Update this CLAUDE.md.
-   - Keep updates concise but complete
+MODE_SWITCHING:
+- Station buttons in header trigger `switch_station()`
+- Updates both registration and checkpoint flags
+- Calls `update_mode_content()` to rebuild UI
 
-**BOOTSTRAP HANDOFF:**
-   - Final CLAUDE.md must enable next session to continue seamlessly
-   - Include specific method names, line numbers, and error states
-   - Document any locks, flags, or states that were in progress
-   - Prioritize tracing your steps, documenting what the last edit was.  
+## PERFORMANCE_CRITICAL_PATHS
 
-## Project Context
-**Project:** TP_NFC - NFC attendance tracking system with GUI  
-**Location:** `C:\src\git\TP_NFC\` (Windows) / `/Users/howard/Documents/GitHub/TP_NFC/` (macOS)  
-**Key Files:** To read before attempting to implement improvements!
-- `README.md` - Comprehensive project documentation with setup, configuration, architecture, and development guidelines
-- `src/gui/app.py` - Main GUI application (4200+ lines, CustomTkinter)
+GUEST_LOOKUP_OPTIMIZATION:
+- OLD: `self.sheets_service.find_guest_by_id(guest_id)` → API call → 500-2000ms
+- NEW: Loop through `self.guests_data` → Memory lookup → 1-5ms
+- DATA_SIZE: ~397 guests typical
 
-# Important Configuration
+UI_UPDATE_PATTERNS:
+- TreeView updates use `_update_guest_table_silent()` for background refresh
+- Status updates have type-based auto-clear timers
+- NFC scanning has 5-second retry on "no tag detected"
 
-**Desktop Configuration:**
-- `config/config.json` - Main application settings
-- `config/credentials.json` - Google API credentials (not in repo)
-- `config/tag_registry.json` - NFC tag mappings (auto-generated)
-- `config/check_in_queue.json` - Offline queue persistence
+## CONFIGURATION_DEPENDENCIES
 
-**Android Configuration:**
-- `Android/buildozer.spec` - Android build configuration (API 30, NDK 25b)
-- `.github/workflows/android-build.yml` - Automated APK build pipeline
-- `Android/requirements.txt` - Python dependencies for mobile app
+EMBEDDED_PYTHON_WINDOWS:
+- Location: `python/python.exe`
+- Packages: `python/Lib/site-packages/`
+- Path config: `python313._pth`
 
+RUNTIME_CONFIGURATION:
+- Dark mode: `config.json` → `appearance_mode`
+- Window mode: `config.json` → `window_mode` (maximized/fullscreen)
+- Stations: `config.json` → `stations` list
+- Developer password: `config.json` → `developer.password` (default: 8888)
 
-## Last Session Summary (Portable Distribution & Windows Install Issues)
+## ERROR_HANDLING_PATTERNS
 
-### ✅ Completed This Session:
+NFC_ERRORS:
+- No reader: Shows persistent error in status bar
+- Tag read failure: 5-second retry with countdown
+- Duplicate scan: 3-second cooldown
 
-**13. Complete Portable Distribution System** (FULLY COMPLETED ✅):
-- **Windows Portable Python**: Embedded Python 3.13.5 installed in `python/` directory with all dependencies
-- **macOS Portable Setup**: Uses system Python 3.13 with all dependencies in local `portable_python/site-packages/`
-- **Self-Contained Project**: All dependencies now included within project folder - no external dependencies needed
-- **Multiple Launchers**: Clean launcher options in `launchers/` folder for different user preferences
-- **Developer Tools**: Simple `python3 run.py` command for VS Code development
+NETWORK_ERRORS:
+- Offline mode: Queue check-ins locally
+- Sync retry: Background thread every 30 seconds
+- Internet check: Lightweight ping every 10 seconds
 
-**14. Windows Install.bat Configuration Fix** (COMPLETED ✅):
-- **Issue Resolved**: `install.bat` now works correctly with proper Python environment
-- **Root Cause**: Python installation was already working, the issue was in testing methodology
-- **Current Status**: Complete Windows portable Python setup functioning properly
-- **Verification**: All requirements installed successfully, application runs without errors
+## CURRENT_ISSUES
 
-**Key Technical Implementation**:
-- **Windows Python Path Management**: Embedded Python uses `python313._pth` for proper module resolution
-- **Local Dependency Installation**: `install.bat` installs packages to `python\Lib\site-packages`
-- **Clean Launcher System**: `start.command` provides optimal user experience (28 lines, nohup approach)
-- **Cross-Platform Compatibility**: Windows uses embedded Python in `python/`, macOS uses system Python with local packages
-- **Complete Zero Dependencies**: Both platforms achieve fully portable, self-contained distribution
+KNOWN_BUGS:
+- None critical
 
-**Distribution Benefits**:
-- **Zero External Dependencies**: Everything needed is included in the project folder
-- **Easy Deployment**: Copy entire folder to any machine and run
-- **No Virtual Environment Needed**: Portable packages replace venv requirement
-- **Clean User Experience**: Double-click launchers work seamlessly
+OPTIMIZATION_OPPORTUNITIES:
+- TreeView could use virtual rendering for large guest lists
+- Check-in queue could batch API calls
+- Status messages could use priority queue
 
-### Previous Major Achievements:
-- Complete modern button design system with outline + hover fill pattern
-- Light/dark theme toggle with full TreeView theming
-- Row hover system with selection elimination  
-- NFC status blinking alerts
-- Offline data caching with auto-refresh
-- Non-interactive UI elements (summary row, headers, tooltips)
+## BUILD_COMMANDS
 
-## Project Overview
-
-TP_NFC is an NFC-based attendance tracking system for event management. It tracks guest attendance at multiple stations using NFC wristbands and synchronizes data with Google Sheets.
-
-**Platform Support:**
-- ✅ **Desktop**: Complete CustomTkinter application (Windows/macOS/Linux)
-- ✅ **Android**: Complete KivyMD mobile app with automated APK builds
-- 🔄 **Next**: iOS support planned
-
-## Architecture
-
-**Desktop Application (Complete ✅):**
-- **Presentation Layer**: `src/gui/app.py` - CustomTkinter GUI with 3000+ lines
-- **Service Layer**: Services in `src/services/` handle NFC, Google Sheets, and tag management
-- **Data Layer**: Models in `src/models/` with JSON persistence in `config/`
-
-**Android Application (Complete ✅):**
-- **Presentation Layer**: `Android/src/gui/` - KivyMD Material Design interface
-- **Service Layer**: `Android/src/services/` - Ported from desktop with Android NFC integration
-- **Data Layer**: `Android/src/models/` - Same data models as desktop
-- **Build System**: Docker-based buildozer with automated GitHub Actions APK generation
-
-Key architectural decisions:
-- Cross-platform NFC abstraction that auto-selects backend (nfcpy vs pyscard)
-- Asynchronous operations using ThreadPoolExecutor for non-blocking UI
-- Offline-first design with local queue that syncs when connection available
-- Thread-safe UI updates using `safe_update_widget` wrapper
-
-## Common Commands
-
-```bash
-# Setup portable distribution (one-time setup)
-./install.command  # macOS - installs all dependencies locally
-./install.bat      # Windows - installs all dependencies locally
-
-# Run the application (for end users)
-./launchers/start.command  # macOS - recommended, cleanest experience
-./launchers/start.bat      # Windows
-
-# Run the application (for development)
-python3 run.py                    # Simple launcher for VS Code/development
-
-# Run tests
-pytest
-
-# Run tests with coverage
-pytest --cov
-
-# Lint code
-flake8
-
-# Test NFC reader
-./tools/test_nfc.command    # macOS
-./tools/test_nfc.bat        # Windows
-
-# Test Google Sheets connection
-./tools/test_sheets.command # macOS
-./tools/test_sheets.bat     # Windows
-
-# Build Android APK (automated via GitHub Actions)
-git add . && git commit -m "Update Android app" && git push origin master
-# APK will be available as artifact in GitHub Actions
+WINDOWS_RUN:
+```
+cd C:\src\git\TP_NFC
+python\python.exe src\main.py
 ```
 
-## Key Components
-
-**Desktop Application:**
-1. **NFC Service** (`src/services/unified_nfc_service.py`): Abstracts NFC reader interaction with automatic backend selection
-2. **Google Sheets Service** (`src/services/google_sheets_service.py`): Manages attendance data synchronization with retry logic
-3. **Tag Manager** (`src/services/tag_manager.py`): Handles NFC tag-to-guest mappings with local persistence
-4. **Check-in Queue** (`src/services/check_in_queue.py`): Implements offline queue with background sync
-5. **Main GUI** (`src/gui/app.py`): Complex state management with multiple operational modes
-
-**Android Application:**
-1. **Android NFC Service** (`Android/src/services/android_nfc_service.py`): Native Android NFC integration via pyjnius
-2. **Mobile GUI** (`Android/src/gui/screens/main_screen.py`): KivyMD Material Design interface
-3. **Shared Services**: Google Sheets, Tag Manager, and Check-in Queue ported from desktop
-4. **Build System** (`.github/workflows/android-build.yml`): Docker-based buildozer with automated APK generation
-
-#
-## Development Guidelines
-
-1. **State Management**: The GUI uses complex state tracking. Always use `self.operation_in_progress` flag and proper cleanup
-2. **Thread Safety**: All UI updates must go through `safe_update_widget()` when called from background threads
-3. **Error Handling**: Use comprehensive try-except blocks with user-friendly error messages
-4. **NFC Operations**: Always check `nfc_service.is_ready()` before operations
-5. **Google Sheets**: Handle offline scenarios gracefully with queue fallback
-
-## Testing Approach
-
-- Manual testing scripts in `/tools` directory for hardware integration
-- Unit tests focus on service layer logic
-- No automated GUI testing currently implemented
-
-## Known Issues and Improvements
-
-### ✅ **Windows Portable Distribution - FULLY FUNCTIONAL:**
-**Status**: Complete Windows portable Python environment working perfectly
-**Python Version**: Python 3.13.5 embedded with all dependencies
-**Package Installation**: All requirements.txt packages installed successfully in `python\Lib\site-packages`
-**Application Testing**: GUI launches and runs without errors (expected NFC/Google Sheets errors for unconfigured environment)
-
-### 🎯 **Current Configuration:**
+LAUNCHER_RUN:
 ```
-TP_NFC/
-├── python/                    # Embedded Python 3.13.5
-│   ├── python.exe            # Main Python executable
-│   ├── python313._pth        # Path configuration file
-│   ├── Lib/site-packages/    # All installed dependencies
-│   └── Scripts/              # pip, pytest, flake8, etc.
-├── install.bat               # Setup script (working)
-├── launchers/start.bat       # Application launcher
-└── src/main.py              # Main application
+C:\src\git\TP_NFC\launchers\start.bat
 ```
 
-### ✅ **Verified Working Components:**
-1. **Python executable**: `python\python.exe --version` → Python 3.13.5
-2. **Package manager**: `python\python.exe -m pip --version` → pip 25.1.1  
-3. **All dependencies**: pytest, customtkinter, google-api-python-client, etc.
-4. **Application execution**: `python\python.exe src\main.py` launches GUI successfully
-5. **Zero external dependencies**: Complete self-contained folder
-
-## ✅ **Project Status: STABLE PORTABLE DISTRIBUTION**
-
-The TP_NFC project now has a **fully functional, zero-dependency portable distribution system**:
-
-- **Windows**: Complete embedded Python 3.13.5 setup in `python/` directory
-- **macOS**: System Python with local dependencies in `portable_python/site-packages/`  
-- **Android**: Automated APK builds via GitHub Actions
-- **All Platforms**: Self-contained folders requiring no external dependencies
-
-**Next Development Focus**: Feature enhancements and iOS support planning.
+TEST_COMMANDS:
+```
+python\python.exe -m pytest
+python\Scripts\flake8.exe src
+```

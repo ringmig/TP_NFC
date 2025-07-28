@@ -109,8 +109,8 @@ class NFCApp(ctk.CTk):
     STATUS_WAITING_FOR_CHECKIN = "Waiting on check-in..."
     STATUS_READY_CHECKIN = ""
     STATUS_CHECKIN_PAUSED = "Check-in Paused"
-    STATUS_NFC_NOT_CONNECTED = "⚠️ NFC READER NOT CONNECTED"
-    STATUS_NFC_CONNECTED = "✅ NFC reader connected"
+    STATUS_NFC_NOT_CONNECTED = "NFC READER NOT CONNECTED"
+    STATUS_NFC_CONNECTED = "NFC reader connected!"
     STATUS_NO_TAG_DETECTED = "No tag detected - try again"
     STATUS_PLEASE_ENTER_GUEST_ID = "Please enter a Guest ID first"
     STATUS_INVALID_ID_FORMAT = "Invalid ID format"
@@ -119,11 +119,11 @@ class NFCApp(ctk.CTk):
     
     # Sync status label constants
     SYNC_STATUS_CONNECTED = "Live  ◉"
-    SYNC_STATUS_EMPTY = "Sheets Empty  ⚠️"
-    SYNC_STATUS_RATE_LIMITED = "Rate Limited  ⚠️"
+    SYNC_STATUS_EMPTY = "Sheets Empty  ✕"
+    SYNC_STATUS_RATE_LIMITED = "Rate Limited  ✕"
     SYNC_STATUS_NO_INTERNET = "No Internet  ✕"
-    SYNC_STATUS_OFFLINE = "Google Service Offline  ⚠️"
-    SYNC_STATUS_ERROR = "Sync Failed  ⚠️"
+    SYNC_STATUS_OFFLINE = "Google Service Offline  ✕"
+    SYNC_STATUS_ERROR = "Sync Failed  ✕"
     
     # Internet connectivity test constants
     TEST_INTERNET_URL = "http://www.google.com"
@@ -227,9 +227,6 @@ class NFCApp(ctk.CTk):
         
         self.minsize(800, 800)
 
-        # Platform-specific fullscreen implementation
-        self.setup_fullscreen()
-
         # Check critical files before UI initialization
         self.check_file_integrity()
         
@@ -241,6 +238,8 @@ class NFCApp(ctk.CTk):
         # Apply theme to TreeView immediately after widgets are created
         self._update_treeview_theme()
         
+        # Platform-specific fullscreen implementation - moved after UI creation to prevent white screen
+        self.setup_fullscreen()
 
         # Load initial data
         self.after(100, lambda: self.refresh_guest_data(user_initiated=False))
@@ -1783,13 +1782,14 @@ class NFCApp(ctk.CTk):
         center_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
         center_frame.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Instructions
-        instruction_label = ctk.CTkLabel(
+        # Guest name display (above ID entry)
+        self.guest_name_label = ctk.CTkLabel(
             center_frame,
             text="",
-            font=self.fonts['heading']
+            font=CTkFont(size=36, weight="bold"),
+            text_color="#4CAF50"
         )
-        instruction_label.pack(pady=(0, 20))
+        self.guest_name_label.pack(pady=(0, 25))
 
         # ID entry frame
         entry_frame = ctk.CTkFrame(center_frame, fg_color="transparent")
@@ -1805,11 +1805,15 @@ class NFCApp(ctk.CTk):
         )
         self.id_entry.pack(side="left", padx=(0, 10))
         self.id_entry.bind("<Return>", lambda e: self.write_to_band())
+        
+        # Add trace to update guest name when ID changes
+        self.id_entry.bind("<KeyRelease>", self._on_guest_id_change)
+        self.id_entry.bind("<FocusOut>", self._on_guest_id_change)
 
         # Write button
         self.write_btn = ctk.CTkButton(
             entry_frame,
-            text="Write Tag",
+            text="Register Tag",
             command=self.write_to_band,
             width=120,
             height=50,
@@ -1831,15 +1835,6 @@ class NFCApp(ctk.CTk):
         self.write_btn.bind("<Enter>", on_write_enter)
         self.write_btn.bind("<Leave>", on_write_leave)
         self.write_btn.pack(side="left")
-
-        # Guest name display (initially hidden)
-        self.guest_name_label = ctk.CTkLabel(
-            center_frame,
-            text="",
-            font=self.fonts['heading'],
-            text_color="#4CAF50"
-        )
-        self.guest_name_label.pack(pady=(20, 0))
 
         # Focus on entry
         self.safe_update_widget('id_entry', lambda w: w.focus())
@@ -2361,6 +2356,51 @@ class NFCApp(ctk.CTk):
             self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
         elif not self.settings_visible:
             self._update_status_with_correct_type()
+
+    def _on_guest_id_change(self, event=None):
+        """Update guest name display when Guest ID changes."""
+        try:
+            guest_id_text = self.id_entry.get().strip()
+            
+            # Clear name if ID is empty
+            if not guest_id_text:
+                self.safe_update_widget('guest_name_label', lambda w: w.configure(text=""))
+                return
+            
+            # Validate ID format
+            try:
+                guest_id = int(guest_id_text)
+            except ValueError:
+                # Invalid format - clear name
+                self.safe_update_widget('guest_name_label', lambda w: w.configure(text=""))
+                return
+            
+            # Look up guest in cached data (much faster!)
+            guest = None
+            if hasattr(self, 'guests_data'):
+                for g in self.guests_data:
+                    if g.original_id == guest_id:
+                        guest = g
+                        break
+            
+            if guest:
+                guest_name = guest.full_name
+                self.safe_update_widget(
+                    'guest_name_label',
+                    lambda w, text: w.configure(text=text, text_color="#4CAF50"),
+                    guest_name
+                )
+            else:
+                # Guest not found - show "Guest not found" message
+                self.safe_update_widget(
+                    'guest_name_label',
+                    lambda w: w.configure(text="Guest not found", text_color="#ff6b6b")
+                )
+                
+        except Exception as e:
+            self.logger.debug(f"Error updating guest name: {e}")
+            # On error, just clear the label
+            self.safe_update_widget('guest_name_label', lambda w: w.configure(text=""))
 
     # toggle_reception_mode method removed - Reception now always has checkpoint mode active
 
@@ -3124,11 +3164,64 @@ class NFCApp(ctk.CTk):
             self._settings_timer = self.after(15000, self._auto_close_settings)
             self.logger.debug("Settings timer restarted due to user interaction")
 
+    def _create_themed_toplevel(self, parent=None):
+        """Create a CTkToplevel window with correct title bar theme."""
+        if parent is None:
+            parent = self
+        
+        # Create the window
+        window = ctk.CTkToplevel(parent)
+        
+        # Apply dark title bar if needed - will be called after deiconify()
+        if not self.is_light_mode:
+            # Store the window reference so we can apply dark title bar later
+            window._needs_dark_title = True
+        
+        return window
+    
+    def apply_dark_title_bar_after_show(self, window):
+        """Apply dark title bar after window is shown."""
+        if hasattr(window, '_needs_dark_title') and window._needs_dark_title:
+            self._apply_dark_title_bar(window)
+            window._needs_dark_title = False
+    
+    def _apply_dark_title_bar(self, window):
+        """Apply dark title bar to window on Windows."""
+        try:
+            import platform
+            if platform.system() == "Windows":
+                import ctypes as ct
+                
+                def apply_dark_mode():
+                    try:
+                        # Windows API constants
+                        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+                        
+                        # Get window handle
+                        hwnd = ct.windll.user32.GetParent(window.winfo_id())
+                        
+                        # Apply dark mode to title bar
+                        value = ct.c_int(2)  # 2 = enable dark mode
+                        ct.windll.dwmapi.DwmSetWindowAttribute(
+                            hwnd, 
+                            DWMWA_USE_IMMERSIVE_DARK_MODE,
+                            ct.byref(value), 
+                            ct.sizeof(value)
+                        )
+                    except Exception as e:
+                        self.logger.debug(f"Dark title bar API call failed: {e}")
+                
+                # Apply immediately - window is already shown
+                window.after(1, apply_dark_mode)
+                
+        except Exception as e:
+            self.logger.debug(f"Could not apply dark title bar: {e}")
+
     def show_logs(self):
         """Show log viewer dialog."""
         self._restart_settings_timer()  # Restart timer on button interaction
         self.logger.info("User opened log viewer")
-        log_window = ctk.CTkToplevel(self)
+        log_window = self._create_themed_toplevel()
         log_window.title("Realtime Logs")
         log_window.transient(self)
         log_window.withdraw()  # Hide window during setup
@@ -3139,6 +3232,7 @@ class NFCApp(ctk.CTk):
         y = (log_window.winfo_screenheight() // 2) - (height // 2)
         log_window.geometry(f"{width}x{height}+{x}+{y}")
         log_window.deiconify()  # Show window at correct position
+        self.apply_dark_title_bar_after_show(log_window)
 
         # Title
         title_label = ctk.CTkLabel(log_window, text="", font=self.fonts['heading'])
@@ -3301,7 +3395,7 @@ class NFCApp(ctk.CTk):
         # Force button to lose focus to prevent stuck state
         self.focus_set()  # Move focus to main window
         
-        password_window = ctk.CTkToplevel(self)
+        password_window = self._create_themed_toplevel()
         password_window.title("")
         password_window.transient(self)
         password_window.withdraw()  # Hide window during setup
@@ -3335,6 +3429,7 @@ class NFCApp(ctk.CTk):
         password_window.geometry(f"{width}x{height}+{x}+{y}")
         password_window.grab_set()
         password_window.deiconify()  # Show window at correct position
+        self.apply_dark_title_bar_after_show(password_window)
 
         # Title
         title_label = ctk.CTkLabel(password_window, text="Enter Password", font=self.fonts['heading'])
@@ -3438,7 +3533,7 @@ class NFCApp(ctk.CTk):
 
     def show_developer_mode(self):
         """Show developer mode interface."""
-        dev_window = ctk.CTkToplevel(self)
+        dev_window = self._create_themed_toplevel()
         dev_window.title("")
         dev_window.resizable(False, False)
         dev_window.transient(self)
@@ -3453,6 +3548,7 @@ class NFCApp(ctk.CTk):
         y = (dev_window.winfo_screenheight() // 2) - (height // 2)
         dev_window.geometry(f"{width}x{height}+{x}+{y}")
         dev_window.deiconify()  # Show window at correct position
+        self.apply_dark_title_bar_after_show(dev_window)
 
         # Main frame with padding
         main_frame = ctk.CTkFrame(dev_window)
@@ -3590,7 +3686,7 @@ class NFCApp(ctk.CTk):
         dev_window.focus_set()  # Move focus to dev window
         
         # Confirmation dialog
-        confirm_window = ctk.CTkToplevel(dev_window)
+        confirm_window = self._create_themed_toplevel(dev_window)
         confirm_window.title("Confirm Clear All Data")
         confirm_window.geometry("300x300")
         confirm_window.transient(dev_window)
@@ -4491,12 +4587,14 @@ class NFCApp(ctk.CTk):
         self._id_clear_timer = self.after(15000, self._auto_clear_id_field)
 
     def _auto_clear_id_field(self):
-        """Auto-clear the guest ID field."""
+        """Auto-clear the guest ID field and guest name."""
         if hasattr(self, 'id_entry'):
             try:
                 # Check if the widget still exists and is valid
                 if self.id_entry.winfo_exists():
                     self.id_entry.delete(0, 'end')
+                    # Also clear the guest name display
+                    self.safe_update_widget('guest_name_label', lambda w: w.configure(text=""))
             except (AttributeError, tk.TclError):
                 # Widget was destroyed, ignore the error
                 pass
@@ -5311,6 +5409,8 @@ class NFCApp(ctk.CTk):
                 # Fill registration form
                 self.id_entry.delete(0, 'end')
                 self.id_entry.insert(0, str(guest_id))
+                # Trigger guest name display update
+                self._on_guest_id_change()
                 # Start 15-second auto-clear timer
                 self._start_id_clear_timer()
             elif self.is_rewrite_mode:
@@ -5485,7 +5585,7 @@ class NFCApp(ctk.CTk):
         self._enable_rewrite_ui()
 
         # Create confirmation dialog
-        confirm_window = ctk.CTkToplevel(self)
+        confirm_window = self._create_themed_toplevel()
         confirm_window.title("Confirm Rewrite")
         confirm_window.geometry("450x350")
         confirm_window.transient(self)

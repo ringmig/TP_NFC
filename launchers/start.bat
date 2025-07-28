@@ -34,8 +34,10 @@ if not exist "src\main.py" (
 REM Set PYTHONPATH to include our local site-packages and src directory
 set PYTHONPATH=%CD%\python\site-packages;%CD%\src;%PYTHONPATH%
 
-echo Running TP_NFC application...
-echo Current directory: %CD%
-
-REM Run the application directly
-python\python.exe src\main.py
+REM Try to run hidden with PowerShell, fallback to minimized if not available
+powershell -WindowStyle Hidden -Command "& { cd '%CD%'; $env:PYTHONPATH='%CD%\python\site-packages;%CD%\src'; & '.\python\python.exe' 'src\main.py' }" 2>nul
+if %errorlevel% neq 0 (
+    REM PowerShell not available, use start /min for minimized window
+    echo PowerShell not found, launching minimized...
+    start /min "" python\python.exe src\main.py
+)
