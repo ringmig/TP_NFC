@@ -17,7 +17,7 @@ if exist "%PORTABLE_PYTHON_DIR%\python.exe" (
     echo Using portable Python distribution...
     set "PYTHON_EXECUTABLE=%PORTABLE_PYTHON_DIR%\python.exe"
     echo Portable Python version:
-    "%PYTHON_EXECUTABLE%" --version
+    "%PYTHON_EXECUTABLE%" --version 2>nul || echo Could not get version info
 ) else (
     REM Check for system Python
     python --version >nul 2>&1
@@ -56,16 +56,29 @@ if exist "venv" (
 REM For Windows embeddable Python, we need to modify python313._pth
 if exist "%PORTABLE_PYTHON_DIR%\python313._pth" (
     echo Configuring portable Python path...
-    echo import site >> "%PORTABLE_PYTHON_DIR%\python313._pth"
-    echo ../site-packages >> "%PORTABLE_PYTHON_DIR%\python313._pth"
+    REM Create a backup of the original file
+    if not exist "%PORTABLE_PYTHON_DIR%\python313._pth.bak" (
+        copy "%PORTABLE_PYTHON_DIR%\python313._pth" "%PORTABLE_PYTHON_DIR%\python313._pth.bak"
+    )
+    REM Write the correct paths
+    (
+        echo python313.zip
+        echo .
+        echo python313
+        echo # Uncomment to run site.main() automatically
+        echo import site
+        echo ../../site-packages
+    ) > "%PORTABLE_PYTHON_DIR%\python313._pth"
 )
 
 REM Install get-pip if needed for embeddable Python
 if exist "%PORTABLE_PYTHON_DIR%\python.exe" (
-    if not exist "%PORTABLE_PYTHON_DIR%\Scripts\pip.exe" (
+    echo Checking for pip...
+    "%PYTHON_EXECUTABLE%" -m pip --version >nul 2>&1
+    if %errorlevel% neq 0 (
         echo Installing pip for portable Python...
         powershell -Command "Invoke-WebRequest -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile 'get-pip.py'"
-        "%PYTHON_EXECUTABLE%" get-pip.py --target "%SITE_PACKAGES_DIR%"
+        "%PYTHON_EXECUTABLE%" get-pip.py --no-warn-script-location
         del get-pip.py
     )
 )

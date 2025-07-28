@@ -40,22 +40,29 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `Android/requirements.txt` - Python dependencies for mobile app
 
 
-## Last Session Summary (Portable Distribution System)
+## Last Session Summary (Portable Distribution & Windows Install Issues)
 
 ### ✅ Completed This Session:
 
-**13. Complete Portable Distribution System** (FULLY WORKING ✅):
+**13. Complete Portable Distribution System** (MOSTLY WORKING ✅):
 - **Windows Portable Python**: Embedded Python 3.13.5 installed locally in `portable_python/windows/`
 - **macOS Portable Setup**: Uses system Python 3.13 with all dependencies in local `portable_python/site-packages/`
 - **Self-Contained Project**: All dependencies now included within project folder - no external dependencies needed
 - **Multiple Launchers**: Clean launcher options in `launchers/` folder for different user preferences
 - **Developer Tools**: Simple `python3 run.py` command for VS Code development
 
+**14. Windows Install.bat Configuration Fix** (IN PROGRESS 🔄):
+- **Issue Identified**: `install.bat` produces "ModuleNotFoundError: No module named 'encodings'" error
+- **Root Cause**: Incorrect `python313._pth` configuration in embedded Python
+- **Fix Applied**: Proper path configuration in `install.bat` with correct embedded Python setup
+- **Diagnostic Tool**: Created `test_portable_python.bat` for troubleshooting
+
 **Key Technical Implementation**:
 - **Portable Python Path Management**: `portable_python_path.py` automatically configures Python paths
 - **Local Dependency Installation**: Updated `install.command`/`install.bat` to install packages locally using `--target`
 - **Clean Launcher System**: `start.command` provides optimal user experience (28 lines, nohup approach)
 - **Cross-Platform Compatibility**: Windows uses embedded Python, macOS uses system Python with local packages
+- **Windows Embedded Python Fix**: Proper `python313._pth` configuration to enable encodings module
 
 **Distribution Benefits**:
 - **Zero External Dependencies**: Everything needed is included in the project folder
@@ -166,6 +173,47 @@ git add . && git commit -m "Update Android app" && git push origin master
 - No automated GUI testing currently implemented
 
 ## Known Issues and Improvements
--
 
-The project is actively being stabilized with focus on reliability for live event usage.
+### ❌ **Current Critical Issue (Windows):**
+**Problem**: `install.bat` fails with "ModuleNotFoundError: No module named 'encodings'"
+**Status**: Configuration fix applied but not yet tested on Windows machine
+**Location**: Windows embedded Python in `portable_python/windows/`
+**Root Cause**: Incorrect `python313._pth` configuration preventing core Python modules from loading
+
+### 🔧 **Diagnostic Steps for Windows Machine:**
+1. **Test the portable Python setup**:
+   ```cmd
+   test_portable_python.bat
+   ```
+   
+2. **If test fails, check these files**:
+   - `portable_python/windows/python313._pth` (should contain proper paths)
+   - `portable_python/windows/python.exe` (should exist and be executable)
+   - Error output for specific module loading issues
+
+3. **If test passes, run installation**:
+   ```cmd
+   install.bat
+   ```
+
+### 🎯 **Expected Fix Results:**
+- Proper `python313._pth` configuration:
+  ```
+  python313.zip
+  .
+  python313
+  import site
+  ../../site-packages
+  ```
+- Enables embedded Python to find core modules (encodings, os, sys)
+- Allows pip installation and package management
+- Enables full portable distribution functionality
+
+### 📋 **Next Session Priorities:**
+1. **Test diagnostic script** on Windows machine
+2. **Resolve any remaining path issues** with embedded Python
+3. **Verify complete install.bat workflow** 
+4. **Test full application launch** with portable setup
+5. **Document final working configuration** for Windows distribution
+
+The project is actively being stabilized with focus on cross-platform portable distribution reliability.
