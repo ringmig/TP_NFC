@@ -1,59 +1,41 @@
 @echo off
-REM TP_NFC Portable Application Launcher for Windows
+setlocal
+REM TP_NFC Application Launcher - Portable Version
 
-REM Get script directory and go to parent (project root)
-set "SCRIPT_DIR=%~dp0"
-set "PROJECT_DIR=%SCRIPT_DIR%.."
+REM Get the directory where this script is located (launchers folder)
+set "LAUNCHER_DIR=%~dp0"
+REM Get the project root (TP_NFC folder) - parent of launchers
+set "PROJECT_DIR=%LAUNCHER_DIR%.."
+
+REM Change to the project root directory
 cd /d "%PROJECT_DIR%"
 
-REM Check for portable Python first
-set "PORTABLE_PYTHON_DIR=%PROJECT_DIR%\portable_python\windows"
-set "PYTHON_EXECUTABLE="
-set "SITE_PACKAGES_DIR=%PROJECT_DIR%\portable_python\site-packages"
+REM Define paths relative to the current directory (which is now PROJECT_DIR)
+set "PYTHON_DIR=python"
+set "PYTHON_EXECUTABLE=python\python.exe"
+set "SITE_PACKAGES_DIR=python\site-packages"
 
-if exist "%PORTABLE_PYTHON_DIR%\python.exe" (
-    set "PYTHON_EXECUTABLE=%PORTABLE_PYTHON_DIR%\python.exe"
-) else (
-    REM Check for system Python
-    python --version >nul 2>&1
-    if %errorlevel% equ 0 (
-        set "PYTHON_EXECUTABLE=python"
-    ) else (
-        echo Error: No Python installation found. Please run install.bat first.
-        pause
-        exit /b 1
-    )
-)
-
-REM Check if site-packages directory exists
-if not exist "%SITE_PACKAGES_DIR%" (
-    echo Error: Portable packages not found. Please run install.bat first.
+REM Check if Python executable exists
+if not exist "%PYTHON_EXECUTABLE%" (
+    echo Error: Python executable not found at %PYTHON_EXECUTABLE%
+    echo Please run install.bat first to set up the environment.
     pause
     exit /b 1
 )
 
-REM Check if main.py exists
+REM Check if main.py exists in src
 if not exist "src\main.py" (
-    echo Error: src\main.py not found. Please ensure you're in the correct directory.
+    echo Error: src\main.py not found.
+    echo Please ensure you are running this from the correct location.
     pause
     exit /b 1
 )
 
-REM Set Python path to include portable packages
-set "PYTHONPATH=%SITE_PACKAGES_DIR%;%PYTHONPATH%"
+REM Set PYTHONPATH to include our local site-packages and src directory
+set PYTHONPATH=%CD%\python\site-packages;%CD%\src;%PYTHONPATH%
 
-REM Launch application hidden using PowerShell with portable Python path
-powershell -WindowStyle Hidden -Command "& { 
-    Set-Location '%PROJECT_DIR%'; 
-    $env:PYTHONPATH='%SITE_PACKAGES_DIR%;' + $env:PYTHONPATH; 
-    & '%PYTHON_EXECUTABLE%' -c \"
-import portable_python_path
-import sys
-import os
-# Add src directory to path
-src_dir = os.path.join(os.getcwd(), 'src')
-sys.path.insert(0, src_dir)
-import main
-main.main()
-\" 
-}"
+echo Running TP_NFC application...
+echo Current directory: %CD%
+
+REM Run the application directly
+python\python.exe src\main.py

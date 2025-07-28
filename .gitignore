@@ -84,3 +84,4 @@ pip-audit-report.json
 
 # CI artifacts and logs
 .github/ci_logs/
+.claude/settings.local.json
