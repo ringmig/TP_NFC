@@ -537,23 +537,31 @@ class TPNFCApp(App):
                 break
         
         if logo_path:
-            logo = Image(
+            # Create clickable logo - back to simple approach
+            self.logo_image = Image(
                 source=logo_path,
                 size_hint_x=None,
                 width=dp(60),
                 fit_mode="contain"
             )
+            # Make the image clickable
+            self.logo_image.bind(on_touch_down=self.logo_touch_handler)
+            logo = self.logo_image
         else:
-            logo = Label(
+            # Clickable text logo
+            logo = Button(
                 text='La Isla Bonita',
                 font_size=dp(18),
                 color=(1, 1, 1, 1),
                 bold=True,
                 size_hint_x=None,
                 width=dp(120),  # Increased width for longer name
-                halign='left'
+                halign='left',
+                background_normal='',
+                background_down='',
+                background_color=(0, 0, 0, 0)  # Transparent
             )
-            logo.bind(size=logo.setter('text_size'))
+            logo.bind(on_press=self.logo_refresh_with_animation)
         
         # Status text - Shows messages when needed, empty when idle
         self.status = Label(
@@ -563,16 +571,14 @@ class TPNFCApp(App):
             text_size=(None, None)  # Allow text to expand
         )
         
-        # Hamburger menu - HIDDEN for now but keeping code
-        # menu_btn = HamburgerMenu(
-        #     size_hint_x=None,
-        #     width=dp(40)
-        # )
-        # menu_btn.bind(on_press=self.show_menu)
+        # No refresh button - logo will be the refresh button
+        
+        # Add spacer widget to keep status centered
+        spacer = Widget(size_hint_x=None, width=dp(60))  # Same width as logo for balance
         
         header.add_widget(logo)
         header.add_widget(self.status)
-        # header.add_widget(menu_btn)  # Hidden
+        header.add_widget(spacer)  # Invisible spacer for centering
         root.add_widget(header)
         
         # Top action buttons - Tag Info and Register Tag (50/50 width)
@@ -899,9 +905,127 @@ class TPNFCApp(App):
     def _update_search_outline(self, instance, value):
         self.search_outline.rounded_rectangle = (instance.x, instance.y, instance.width, instance.height, dp(6))
     
-    def show_menu(self, instance):
-        # Menu does nothing for now
-        pass
+    def logo_touch_handler(self, instance, touch):
+        """Handle logo touch events"""
+        if instance.collide_point(*touch.pos):
+            self.logo_refresh_with_animation(instance)
+            return True
+        return False
+    
+    def logo_refresh_with_animation(self, instance):
+        """Logo click triggers refresh with spinning animation"""
+        # Don't allow refresh during scanning operations
+        if self.scanning_mode is not None:
+            return
+            
+        # Show refreshing status
+        self.status.text = 'Refreshing guest data...'
+        self.status.color = (0.2, 0.6, 1, 1)  # Blue color
+        
+        # Start spinning animation if logo exists
+        if hasattr(self, 'logo_image'):
+            self.start_logo_spin_animation()
+        
+        # Dim logo temporarily to prevent multiple requests
+        instance.opacity = 0.7
+        
+        # Schedule the actual refresh to happen after UI update
+        Clock.schedule_once(lambda dt: self._perform_logo_refresh(instance), 0.1)
+    
+    def start_logo_spin_animation(self):
+        """Start single-rotation spinning animation using canvas transforms with forced updates"""
+        from kivy.clock import Clock
+        from kivy.graphics import PushMatrix, Rotate, PopMatrix
+        
+        # Clear any existing animation first
+        if hasattr(self, 'spin_timer') and self.spin_timer:
+            self.spin_timer.cancel()
+            self.spin_timer = None
+        
+        # Setup canvas rotation if not already done
+        if not hasattr(self, 'logo_rotate'):
+            self.logo_image.canvas.before.clear()
+            self.logo_image.canvas.after.clear()
+            
+            with self.logo_image.canvas.before:
+                PushMatrix()
+                self.logo_rotate = Rotate(angle=0, origin=(self.logo_image.center_x, self.logo_image.center_y))
+            with self.logo_image.canvas.after:
+                PopMatrix()
+        else:
+            # Reset rotation and update origin
+            self.logo_rotate.angle = 0
+            self.logo_rotate.origin = (self.logo_image.center_x, self.logo_image.center_y)
+        
+        # Animation state
+        self.spin_start_time = Clock.get_time()
+        self.spin_duration = 1.0  # 1 second
+        
+        # Start manual rotation timer (60 FPS)
+        self.spin_timer = Clock.schedule_interval(self.update_logo_rotation, 1/60.0)
+    
+    def update_logo_rotation(self, dt):
+        """Update logo rotation manually with canvas transforms"""
+        current_time = Clock.get_time()
+        elapsed = current_time - self.spin_start_time
+        
+        if elapsed >= self.spin_duration:
+            # Animation complete - reset and stop
+            self.logo_rotate.angle = 0
+            # Force canvas update
+            self.logo_image.canvas.ask_update()
+            if hasattr(self, 'spin_timer') and self.spin_timer:
+                self.spin_timer.cancel()
+                self.spin_timer = None
+            return False
+        
+        # Calculate rotation angle (0 to 360 degrees over duration)
+        progress = elapsed / self.spin_duration
+        angle = progress * 360
+        self.logo_rotate.angle = angle
+        
+        # Force canvas redraw
+        self.logo_image.canvas.ask_update()
+        
+        return True  # Continue animation
+    
+    
+    def _perform_logo_refresh(self, logo_btn):
+        """Perform the actual refresh operation for logo in background thread"""
+        import threading
+        
+        def background_refresh():
+            try:
+                # Refresh data from Google Sheets (this is the blocking operation)
+                self.refresh_from_sheets()
+                
+                # Schedule UI updates on main thread
+                def update_ui(dt):
+                    # Update guest check-ins for current station  
+                    self.refresh_guest_checkins()
+                    # No success message - just clear status
+                    self.clear_status_message()
+                    # Re-enable logo
+                    logo_btn.opacity = 1.0
+                
+                Clock.schedule_once(update_ui, 0)
+                
+            except Exception as e:
+                # Show error message only on failure
+                self.logger.error(f"Manual refresh failed: {e}")
+                
+                def show_error(dt):
+                    self.status.text = 'Refresh failed'
+                    self.status.color = (0.8, 0.2, 0.2, 1)  # Red color
+                    # Clear error message after 3 seconds
+                    Clock.schedule_once(lambda dt: self.clear_status_message(), 3)
+                    # Re-enable logo
+                    logo_btn.opacity = 1.0
+                
+                Clock.schedule_once(show_error, 0)
+        
+        # Start background thread for API call
+        threading.Thread(target=background_refresh, daemon=True).start()
     
     def station_selected(self, station):
         # Don't allow station changes during scanning
