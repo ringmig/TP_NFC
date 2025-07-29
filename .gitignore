@@ -65,6 +65,7 @@ htmlcov/
 *.tmp
 *.bak
 *~
+temp*/
 /Android/temp/
 Android/temp_*/
 Android/buildozer_*_backup.spec

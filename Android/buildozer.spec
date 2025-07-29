@@ -28,6 +28,9 @@ orientation = portrait
 # (bool) Indicate if the application should be fullscreen or not
 fullscreen = 0
 
+# (str) Filename of the icon of the application
+icon.filename = logo.png
+
 [buildozer]
 
 # (int) Log level (0 = error only, 1 = info, 2 = debug (with command output))

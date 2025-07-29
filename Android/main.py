@@ -545,12 +545,12 @@ class TPNFCApp(App):
             )
         else:
             logo = Label(
-                text='TP NFC',
+                text='La Isla Bonita',
                 font_size=dp(18),
                 color=(1, 1, 1, 1),
                 bold=True,
                 size_hint_x=None,
-                width=dp(60),
+                width=dp(120),  # Increased width for longer name
                 halign='left'
             )
             logo.bind(size=logo.setter('text_size'))
@@ -563,16 +563,16 @@ class TPNFCApp(App):
             text_size=(None, None)  # Allow text to expand
         )
         
-        # Hamburger menu
-        menu_btn = HamburgerMenu(
-            size_hint_x=None,
-            width=dp(40)
-        )
-        menu_btn.bind(on_press=self.show_menu)
+        # Hamburger menu - HIDDEN for now but keeping code
+        # menu_btn = HamburgerMenu(
+        #     size_hint_x=None,
+        #     width=dp(40)
+        # )
+        # menu_btn.bind(on_press=self.show_menu)
         
         header.add_widget(logo)
         header.add_widget(self.status)
-        header.add_widget(menu_btn)
+        # header.add_widget(menu_btn)  # Hidden
         root.add_widget(header)
         
         # Top action buttons - Tag Info and Register Tag (50/50 width)
@@ -667,7 +667,9 @@ class TPNFCApp(App):
             padding=[dp(12), dp(12)],  # Better vertical centering
             background_normal='',
             background_active='',
-            halign='center'  # Center text horizontally
+            halign='left',  # Left-align text for better mobile UX
+            input_type='text',  # Explicitly set input type for mobile
+            keyboard_suggestions=True  # Enable keyboard suggestions on mobile
         )
         self.search_input.bind(text=self.on_search_text)
         
