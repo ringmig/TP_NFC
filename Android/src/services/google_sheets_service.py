@@ -88,8 +88,8 @@ class GoogleSheetsService:
             List of GuestRecord objects
         """
         try:
-            # Define the range to read (all columns from checkin data)
-            range_name = f"{self.sheet_name}!A:H"
+            # Define the range to read (including phone number column)
+            range_name = f"{self.sheet_name}!A:I"
             
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.spreadsheet_id,
@@ -111,23 +111,30 @@ class GoogleSheetsService:
                 try:
                     # Ensure we have at least the required fields
                     if len(row) >= 3:
-                        original_id = int(row[0])
+                        # Handle UTF-8 BOM character that may appear in first column
+                        id_str = row[0].strip().lstrip('\ufeff')
+                        original_id = int(id_str)
                         firstname = row[1]
                         lastname = row[2]
                         
                         guest = GuestRecord(original_id, firstname, lastname)
                         
-                        # Check for existing check-ins
-                        if len(row) > 3 and row[3]:  # reception
-                            guest.check_ins['reception'] = row[3]
-                        if len(row) > 4 and row[4]:  # lio
-                            guest.check_ins['lio'] = row[4]
-                        if len(row) > 5 and row[5]:  # juntos
-                            guest.check_ins['juntos'] = row[5]
-                        if len(row) > 6 and row[6]:  # experimental
-                            guest.check_ins['experimental'] = row[6]
-                        if len(row) > 7 and row[7]:  # unvrs
-                            guest.check_ins['unvrs'] = row[7]
+                        # Store phone number if available
+                        if len(row) > 3 and row[3]:
+                            guest.phone_number = row[3]
+                        
+                        # Check for existing check-ins (shifted by 1 column due to phone number)
+                        if len(row) > 4 and row[4]:  # reception
+                            guest.check_ins['reception'] = row[4]
+                        if len(row) > 5 and row[5]:  # lio/lío
+                            guest.check_ins['lio'] = row[5]
+                            guest.check_ins['lío'] = row[5]  # Store for both variants
+                        if len(row) > 6 and row[6]:  # juntos
+                            guest.check_ins['juntos'] = row[6]
+                        if len(row) > 7 and row[7]:  # experimental
+                            guest.check_ins['experimental'] = row[7]
+                        if len(row) > 8 and row[8]:  # unvrs
+                            guest.check_ins['unvrs'] = row[8]
                             
                         guests.append(guest)
                         
@@ -153,8 +160,8 @@ class GoogleSheetsService:
             GuestRecord if found, None otherwise
         """
         try:
-            # Get full row data including check-ins
-            range_name = f"{self.sheet_name}!A:H"
+            # Get full row data including phone and check-ins
+            range_name = f"{self.sheet_name}!A:I"
             
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.spreadsheet_id,
@@ -165,22 +172,30 @@ class GoogleSheetsService:
             
             # Find the row with matching ID
             for i, row in enumerate(values[1:], start=2):  # Start from row 2 (skip header)
-                if len(row) > 0 and str(row[0]) == str(original_id):
-                    if len(row) >= 3:
-                        guest = GuestRecord(int(row[0]), row[1], row[2])
+                if len(row) > 0:
+                    # Handle UTF-8 BOM character
+                    id_str = row[0].strip().lstrip('\ufeff')
+                    if str(id_str) == str(original_id):
+                        if len(row) >= 3:
+                            guest = GuestRecord(int(id_str), row[1], row[2])
                         guest.row_number = i  # Store row number for updates
                         
-                        # Load check-in data
-                        if len(row) > 3 and row[3]:  # reception
-                            guest.check_ins['reception'] = row[3]
-                        if len(row) > 4 and row[4]:  # lio
-                            guest.check_ins['lio'] = row[4]
-                        if len(row) > 5 and row[5]:  # juntos
-                            guest.check_ins['juntos'] = row[5]
-                        if len(row) > 6 and row[6]:  # experimental
-                            guest.check_ins['experimental'] = row[6]
-                        if len(row) > 7 and row[7]:  # unvrs
-                            guest.check_ins['unvrs'] = row[7]
+                        # Store phone number if available
+                        if len(row) > 3 and row[3]:
+                            guest.phone_number = row[3]
+                        
+                        # Load check-in data (shifted by 1 column due to phone number)
+                        if len(row) > 4 and row[4]:  # reception
+                            guest.check_ins['reception'] = row[4]
+                        if len(row) > 5 and row[5]:  # lio/lío
+                            guest.check_ins['lio'] = row[5]
+                            guest.check_ins['lío'] = row[5]  # Store for both variants
+                        if len(row) > 6 and row[6]:  # juntos
+                            guest.check_ins['juntos'] = row[6]
+                        if len(row) > 7 and row[7]:  # experimental
+                            guest.check_ins['experimental'] = row[7]
+                        if len(row) > 8 and row[8]:  # unvrs
+                            guest.check_ins['unvrs'] = row[8]
                             
                         return guest
                         
@@ -209,13 +224,14 @@ class GoogleSheetsService:
             if not guest:
                 return False
                 
-            # Map station names to column letters
+            # Map station names to column letters (shifted by 1 due to phone number in column D)
             station_columns = {
-                'reception': 'D',
-                'lio': 'E',
-                'juntos': 'F',
-                'experimental': 'G',
-                'unvrs': 'H'
+                'reception': 'E',
+                'lio': 'F',
+                'lío': 'F',  # Handle accent mark
+                'juntos': 'G',
+                'experimental': 'H',
+                'unvrs': 'I'
             }
             
             column = station_columns.get(station.lower())
@@ -247,11 +263,12 @@ class GoogleSheetsService:
     def get_station_column(self, station: str) -> str:
         """Get the column letter for a given station."""
         station_columns = {
-            'reception': 'D',
-            'lio': 'E',
-            'juntos': 'F',
-            'experimental': 'G',
-            'unvrs': 'H'
+            'reception': 'E',
+            'lio': 'F',
+            'lío': 'F',  # Handle accent mark
+            'juntos': 'G',
+            'experimental': 'H',
+            'unvrs': 'I'
         }
         return station_columns.get(station.lower(), '')
         
@@ -318,8 +335,8 @@ class GoogleSheetsService:
                 self.logger.info("No check-in data to clear")
                 return True
                 
-            # Clear check-in columns (D-H) for all data rows
-            clear_range = f"{self.sheet_name}!D2:H{len(values)}"
+            # Clear check-in columns (E-I) for all data rows (D is phone number)
+            clear_range = f"{self.sheet_name}!E2:I{len(values)}"
             
             # Create empty values for clearing
             clear_values = [[""] * 5 for _ in range(len(values) - 1)]  # 5 columns, all rows except header

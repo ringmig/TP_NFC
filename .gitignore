@@ -42,6 +42,7 @@ config/tag_registry.json
 config/check_in_queue.json
 config/guest_cache.json
 config/*.backup
+Android/config/
 
 # OS files
 .DS_Store
@@ -60,11 +61,15 @@ htmlcov/
 *.tmp
 *.bak
 *~
+/Android/temp/
 
 # Android build artifacts
 Android/.buildozer/
 Android/bin/
 *.apk
+
+# Android development files (keep only main.py active)
+Android/main_*.py
 
 # PyInstaller / cx_Freeze build artifacts
 build/

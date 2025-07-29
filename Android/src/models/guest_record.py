@@ -24,11 +24,13 @@ class GuestRecord:
         self.firstname = firstname
         self.lastname = lastname
         self.full_name = f"{firstname} {lastname}"
+        self.phone_number: Optional[str] = None
         
         # Station check-ins (station_name -> timestamp string or datetime)
         self.check_ins: Dict[str, Optional[Union[str, datetime]]] = {
             'reception': None,
             'lio': None,
+            'lío': None,  # Handle accent mark
             'juntos': None,
             'experimental': None,
             'unvrs': None
