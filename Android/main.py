@@ -413,10 +413,16 @@ class TPNFCApp(App):
                 return True
             else:
                 self.logger.error("Failed to authenticate with Google Sheets")
+                self.update_status("❌ ERROR: Google Sheets authentication failed. Check credentials.", "error")
                 return False
                 
+        except FileNotFoundError as e:
+            self.logger.error(f"Config file not found: {e}")
+            self.update_status("❌ ERROR: Config files missing. Contact admin.", "error")
+            return False
         except Exception as e:
             self.logger.error(f"Error initializing Google Sheets: {e}")
+            self.update_status(f"❌ ERROR: Cannot connect to Google Sheets. {str(e)[:50]}...", "error") 
             return False
     
     def build(self):
@@ -451,8 +457,15 @@ class TPNFCApp(App):
         header.bind(size=self._update_header_bg, pos=self._update_header_bg)
         
         # Logo image - left aligned with NO PADDING
-        logo_path = os.path.join('..', 'assets', 'logo.png')
-        if os.path.exists(logo_path):
+        # Try different logo paths (APK vs development)
+        logo_paths = ['assets/logo.png', os.path.join('..', 'assets', 'logo.png')]
+        logo_path = None
+        for path in logo_paths:
+            if os.path.exists(path):
+                logo_path = path
+                break
+        
+        if logo_path:
             logo = Image(
                 source=logo_path,
                 size_hint_x=None,
@@ -676,20 +689,11 @@ class TPNFCApp(App):
             for guest in sorted_guests:
                 guests.append((guest.original_id, guest.full_name))
         else:
-            # Fallback to demo data if Google Sheets fails
-            self.logger.warning("Using demo data as fallback")
-            guests = [
-                (10, "Alejandro Ruiz"),
-                (9, "Isabella Flores"),
-                (1, "Ana García"),
-                (5, "Sofia Hernández"),
-                (2, "Carlos López"),
-                (4, "Juan Martínez"),
-                (6, "Diego Pérez"),
-                (3, "Maria Rodriguez"),
-                (7, "Lucia Sánchez"),
-                (8, "Miguel Torres")
-            ]
+            # NO DEMO DATA FALLBACK - Show error message to staff
+            self.logger.error("Failed to load guest data from Google Sheets - no guests available")
+            guests = []
+            # Show error in status bar
+            self.update_status("❌ ERROR: Cannot load guest data. Check internet connection and try again.", "error")
         
         self.all_guests = guests  # Store all guests for filtering
         self.guest_rows = []

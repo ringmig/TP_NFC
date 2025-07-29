@@ -68,8 +68,15 @@ jobs:
         # Utilities: filetype, six, pyparsing, pathlib2
         sed -i 's/^requirements = .*/requirements = python3,kivy==2.3.1,kivymd,plyer,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa,requests-oauthlib,oauthlib,pyasn1,googleapis-common-protos,protobuf,certifi,urllib3,PyJWT,cryptography,pathlib2,six,filetype,requests,charset-normalizer,idna,pyparsing/' buildozer.spec
         
-        # CRITICAL: Include JSON and other data files in the APK
+        # CRITICAL: Include JSON, assets, and other data files in the APK
         sed -i 's/^source\.include_exts = .*/source.include_exts = py,png,jpg,kv,atlas,json,txt/' buildozer.spec
+        
+        # CRITICAL: Include assets directory (logo) and config directory
+        if ! grep -q "source.include_patterns" buildozer.spec; then
+          echo "source.include_patterns = assets/*,config/*" >> buildozer.spec
+        else
+          sed -i 's/^source\.include_patterns = .*/source.include_patterns = assets\/*,config\/*/' buildozer.spec
+        fi
         
         # Enable AndroidX and other modern Android features
         if ! grep -q "android.enable_androidx" buildozer.spec; then
