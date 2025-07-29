@@ -471,16 +471,16 @@ class TPNFCApp(App):
                 return True
             else:
                 self.logger.error("Failed to authenticate with Google Sheets")
-                self.update_status("❌ ERROR: Google Sheets authentication failed. Check credentials.", "error")
+                # Can't update UI status during build() - just log the error
                 return False
                 
         except FileNotFoundError as e:
             self.logger.error(f"Config file not found: {e}")
-            self.update_status("❌ ERROR: Config files missing. Contact admin.", "error")
+            # Can't update UI status during build() - just log the error
             return False
         except Exception as e:
             self.logger.error(f"Error initializing Google Sheets: {e}")
-            self.update_status(f"❌ ERROR: Cannot connect to Google Sheets. {str(e)[:50]}...", "error") 
+            # Can't update UI status during build() - just log the error
             return False
     
     def build(self):
@@ -763,8 +763,7 @@ class TPNFCApp(App):
             # NO DEMO DATA FALLBACK - Show error message to staff
             self.logger.error("Failed to load guest data from Google Sheets - no guests available")
             guests = []
-            # Show error in status bar
-            self.update_status("❌ ERROR: Cannot load guest data. Check internet connection and try again.", "error")
+            # Can't update UI status during build() - will show empty guest list
         
         self.all_guests = guests  # Store all guests for filtering
         self.guest_rows = []

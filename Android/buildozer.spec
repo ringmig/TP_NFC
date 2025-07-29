@@ -1,26 +1,26 @@
 [app]
 
 # (str) Title of your application
-title = Test App
+title = TP NFC - Enhanced
 
 # (str) Package name
-package.name = testapp
+package.name = tpnfcenhanced
 
 # (str) Package domain (needed for android/ios packaging)
-package.domain = org.example
+package.domain = com.tpnfc
 
 # (str) Source code where the main.py live
 source.dir = .
 
 # (list) Source files to include (let empty to include all the files)
-source.include_exts = py,png,jpg,kv,atlas
+source.include_exts = py,png,jpg,kv,atlas,json,txt
 
 # (str) Application versioning (method 1)
-version = 0.1
+version = 2.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy==2.1.0
+requirements = python3,kivy==2.3.1,kivymd,plyer,pyjnius
 
 # (str) Supported orientation (landscape, portrait or all)
 orientation = portrait
@@ -36,19 +36,19 @@ log_level = 2
 [android]
 
 # (int) Target Android API, should be as high as possible.
-android.api = 30
+android.api = 31
 
 # (int) Minimum API your APK will support.
-android.minapi = 23
+android.minapi = 21
 
 # (int) Android SDK version to use
-android.sdk = 30
+android.sdk = 31
 
 # (str) Android NDK version to use
 android.ndk = 25b
 
 # (str) Android SDK build tools version to use
-android.build_tools = 30.0.3
+android.build_tools = 31.0.0
 
 # (str) python-for-android URL (to use older, stable version)
 p4a.url = https://github.com/kivy/python-for-android/archive/master.zip
@@ -61,7 +61,7 @@ android.private_storage = True
 
 # (list) The Android architectures to build for
 # available options: armeabi-v7a, arm64-v8a, x86, x86_64
-android.archs = armeabi-v7a
+android.archs = arm64-v8a,armeabi-v7a
 
 # (str) Android entry point, default is ok for Kivy-based app
 android.entrypoint = org.kivy.android.PythonActivity
@@ -188,4 +188,4 @@ ios.codesign.allowed = false
 #ios.codesign.debug = "iPhone Developer: <lastname> <firstname> (<hexstring>)"
 
 # (str) Name of the certificate to use for signing the release version
-#ios.codesign.release = %(ios.codesign.debug)s
+#ios.codesign.release = %(ios.codesign.debug)sandroid.permissions = INTERNET,ACCESS_NETWORK_STATE,NFC,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,CALL_PHONE

@@ -73,9 +73,28 @@ jobs:
         
         # PROVEN METHOD: Place ALL config files directly in source directory with main.py
         # This bypasses source.include_patterns issues entirely
-        echo "📁 Moving ALL config files to source directory (main.py location) for guaranteed inclusion..."
+        echo "📁 Creating config files from GitHub Secrets..."
+        
+        # Create config directory
+        mkdir -p config
+        
+        # Decode and save config files from secrets
+        echo "${{ secrets.CREDENTIALS_JSON }}" | base64 -d > credentials.json
+        echo "${{ secrets.TOKEN_JSON }}" | base64 -d > token.json
+        echo "${{ secrets.CONFIG_JSON }}" | base64 -d > config.json
+        
+        # Update config.json to remove "config/" prefix from paths
+        sed -i 's|"config/credentials.json"|"credentials.json"|g' config.json
+        sed -i 's|"config/token.json"|"token.json"|g' config.json
+        
+        echo "✅ Config files created from secrets"
+        ls -la *.json
+        
+        # Copy config files to config directory as well (for backup)
+        cp *.json config/
+        
         if [ -d "config" ]; then
-          echo "Config directory found, moving all files to source root..."
+          echo "✅ Config directory found, files are ready..."
           
           # Copy each config file individually to source root
           for config_file in config/*; do
@@ -96,8 +115,13 @@ jobs:
           
           # Also copy assets if they exist
           if [ -d "assets" ]; then
-            echo "Assets directory found, ensuring logo is accessible..."
+            echo "✅ Assets directory found, ensuring logo is accessible..."
             cp -r assets/* ./ 2>/dev/null || echo "No assets to copy"
+          elif [ -f "../assets/logo.png" ]; then
+            echo "✅ Found assets in parent directory, copying logo..."
+            cp ../assets/logo.png ./ 2>/dev/null || echo "Failed to copy logo"
+          else
+            echo "⚠️  No assets directory found, logo may not display"
           fi
           
           echo "✅ Files now in source directory (alongside main.py):"
@@ -106,7 +130,7 @@ jobs:
           # Keep backup of original structure
           cp -r config ./config_backup 2>/dev/null || echo "Config backup skipped"
         else
-          echo "❌ Config directory not found!"
+          echo "❌ Config directory not found - this should not happen!"
           exit 1
         fi
         

@@ -66,11 +66,27 @@ htmlcov/
 *.bak
 *~
 /Android/temp/
+Android/temp_*/
+Android/buildozer_*_backup.spec
 
 # Android build artifacts
 Android/.buildozer/
 Android/bin/
 *.apk
+Android/Dockerfile
+Android/0_build.txt
+
+# Android root config files (should only be in config/ subdirectory)
+Android/*.json
+Android/logo.png
+!Android/buildozer*.spec
+!Android/requirements.txt
+
+# APK modification temporary files
+Android/temp_apk_*/
+Android/*-unsigned.apk
+Android/*-aligned.apk
+Android/*-uncompressed.apk
 
 # Android development files (keep only main.py active)
 Android/main_*.py
