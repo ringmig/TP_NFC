@@ -71,18 +71,44 @@ jobs:
         # CRITICAL: Include JSON, assets, and other data files in the APK
         sed -i 's/^source\.include_exts = .*/source.include_exts = py,png,jpg,kv,atlas,json,txt/' buildozer.spec
         
-        # CRITICAL: Include assets directory (logo) and config directory
-        # Use correct buildozer pattern syntax (no spaces after commas)
-        if ! grep -q "source.include_patterns" buildozer.spec; then
-          echo "source.include_patterns = assets/*,config/*" >> buildozer.spec
+        # PROVEN METHOD: Place ALL config files directly in source directory with main.py
+        # This bypasses source.include_patterns issues entirely
+        echo "📁 Moving ALL config files to source directory (main.py location) for guaranteed inclusion..."
+        if [ -d "config" ]; then
+          echo "Config directory found, moving all files to source root..."
+          
+          # Copy each config file individually to source root
+          for config_file in config/*; do
+            if [ -f "$config_file" ]; then
+              filename=$(basename "$config_file")
+              echo "  Moving $config_file -> ./$filename"
+              cp "$config_file" "./$filename"
+            fi
+          done
+          
+          # CRITICAL: Update config.json to point to same directory paths (not config/ subdirectory)  
+          if [ -f "config.json" ]; then
+            echo "📝 Updating config.json paths to point to same directory as main.py..."
+            sed -i 's|"config/credentials.json"|"credentials.json"|g' config.json
+            sed -i 's|"config/token.json"|"token.json"|g' config.json
+            echo "✅ Updated config.json paths for same-directory inclusion"
+          fi
+          
+          # Also copy assets if they exist
+          if [ -d "assets" ]; then
+            echo "Assets directory found, ensuring logo is accessible..."
+            cp -r assets/* ./ 2>/dev/null || echo "No assets to copy"
+          fi
+          
+          echo "✅ Files now in source directory (alongside main.py):"
+          ls -la *.json *.png 2>/dev/null || echo "No config/asset files found"
+          
+          # Keep backup of original structure
+          cp -r config ./config_backup 2>/dev/null || echo "Config backup skipped"
         else
-          sed -i 's/^source\.include_patterns = .*/source.include_patterns = assets\/*,config\/*/' buildozer.spec
+          echo "❌ Config directory not found!"
+          exit 1
         fi
-        
-        # CRITICAL: Also copy config files to root directory as fallback
-        echo "📁 Copying config files to root directory as fallback..."
-        cp -r config/* ./ 2>/dev/null || echo "Config copy failed (may not exist)"
-        ls -la *.json || echo "No JSON files in root"
         
         # Enable AndroidX and other modern Android features
         if ! grep -q "android.enable_androidx" buildozer.spec; then

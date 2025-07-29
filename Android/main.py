@@ -397,29 +397,48 @@ class TPNFCApp(App):
         self.guest_data = []
     
     def get_resource_path(self, relative_path):
-        """Get correct file path for Android vs desktop"""
+        """Get correct file path for Android vs desktop
+        UPDATED: Prioritize same directory as main.py since config files are placed there during build
+        """
+        # First try: Same directory as main.py (where config files are placed during build)
+        main_dir = os.path.dirname(os.path.abspath(__file__))
+        filename = os.path.basename(relative_path)  # Extract just the filename
+        same_dir_path = os.path.join(main_dir, filename)
+        
+        if os.path.exists(same_dir_path):
+            self.logger.info(f"✅ Found {relative_path} in main.py directory: {same_dir_path}")
+            return same_dir_path
+        
         if ANDROID:
             # On Android, files are in the app's private directory
             try:
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 app_dir = PythonActivity.mActivity.getFilesDir().getAbsolutePath()
-                return os.path.join(app_dir, 'app', relative_path)
-            except Exception:
-                # Fallback to relative path if Android detection fails
-                return relative_path
-        else:
-            # Desktop - use relative path
-            return relative_path
+                android_path = os.path.join(app_dir, 'app', relative_path)
+                if os.path.exists(android_path):
+                    return android_path
+                # Also try just the filename in Android app root
+                android_filename_path = os.path.join(app_dir, 'app', filename)
+                if os.path.exists(android_filename_path):
+                    return android_filename_path
+            except Exception as e:
+                self.logger.warning(f"Android path detection failed: {e}")
+        
+        # Final fallback - return original relative path
+        return relative_path
     
     def init_google_sheets(self):
         """Initialize Google Sheets service and load guest data"""
         try:
             # Try multiple config file locations
+            # UPDATED: Prioritize same directory as main.py (where config files are placed during build)
+            main_dir = os.path.dirname(os.path.abspath(__file__))
             config_paths = [
-                self.get_resource_path('config/config.json'),  # Android subdirectory
-                self.get_resource_path('config.json'),         # Android root
-                'config/config.json',                          # Desktop subdirectory
-                'config.json'                                  # Desktop root
+                os.path.join(main_dir, 'config.json'),         # Same directory as main.py (BUILD LOCATION)
+                self.get_resource_path('config.json'),         # Android app directory
+                self.get_resource_path('config/config.json'),  # Android subdirectory 
+                'config.json',                                 # Desktop root
+                'config/config.json'                           # Desktop subdirectory
             ]
             
             config_path = None
@@ -500,11 +519,22 @@ class TPNFCApp(App):
         header.bind(size=self._update_header_bg, pos=self._update_header_bg)
         
         # Logo image - left aligned with NO PADDING
-        # Get logo path using Android-aware method
-        logo_path = self.get_resource_path('assets/logo.png')
-        # Fallback to development path if not found
-        if not os.path.exists(logo_path):
-            logo_path = os.path.join('..', 'assets', 'logo.png')
+        # UPDATED: Logo is now placed in same directory as main.py during build
+        main_dir = os.path.dirname(os.path.abspath(__file__))
+        logo_paths = [
+            os.path.join(main_dir, 'logo.png'),           # Same directory as main.py (BUILD LOCATION)
+            self.get_resource_path('assets/logo.png'),     # Android app subdirectory
+            self.get_resource_path('logo.png'),           # Android app root
+            os.path.join('..', 'assets', 'logo.png'),     # Desktop development path
+            'assets/logo.png'                             # Desktop relative path
+        ]
+        
+        logo_path = None
+        for path in logo_paths:
+            if os.path.exists(path):
+                logo_path = path
+                self.logger.info(f"✅ Found logo at: {logo_path}")
+                break
         
         if logo_path:
             logo = Image(
