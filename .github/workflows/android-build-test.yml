@@ -35,6 +35,14 @@ jobs:
         echo "- Mark Absent feature:" && grep -c "mark_absent\|Mark Absent" main.py || echo "  ❌ Not found"
         echo "- Google Sheets integration:" && grep -c "sheets_service\|google" main.py || echo "  ❌ Not found"
         echo "- Green scanning buttons:" && grep -c "0.15, 0.7, 0.3" main.py || echo "  ❌ Not found"
+        echo ""
+        echo "📁 Checking config files:"
+        if [ -d "config" ]; then
+          echo "Config directory found:"
+          ls -la config/
+        else
+          echo "⚠️  Warning: config directory not found!"
+        fi
         echo "✅ App verification complete"
     
     - name: Prepare buildozer.spec for production build
@@ -50,8 +58,16 @@ jobs:
         sed -i 's/^android\.build_tools = .*/android.build_tools = 31.0.0/' buildozer.spec
         sed -i 's/^android\.archs = .*/android.archs = arm64-v8a,armeabi-v7a/' buildozer.spec # Multi-arch for better compatibility
         
-        # Use updated Kivy version for better performance
-        sed -i 's/^requirements = .*/requirements = python3,kivy==2.3.1,kivymd,plyer,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,filetype/' buildozer.spec
+        # CRITICAL: Include all required Python dependencies
+        # Base: kivy, kivymd, plyer
+        # Google Auth: google-api-python-client, google-auth, google-auth-oauthlib, google-auth-httplib2
+        # Google Auth Dependencies: cachetools, pyasn1, pyasn1-modules, rsa
+        # HTTP/Network: requests, urllib3, certifi, charset-normalizer, idna, httplib2
+        # Utilities: filetype, six, pyparsing
+        sed -i 's/^requirements = .*/requirements = python3,kivy==2.3.1,kivymd,plyer,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,filetype,cachetools,requests,urllib3,certifi,charset-normalizer,idna,httplib2,pyparsing,pyasn1,pyasn1-modules,rsa,six/' buildozer.spec
+        
+        # CRITICAL: Include JSON and other data files in the APK
+        sed -i 's/^source\.include_exts = .*/source.include_exts = py,png,jpg,kv,atlas,json,txt/' buildozer.spec
         
         # Enable AndroidX and other modern Android features
         if ! grep -q "android.enable_androidx" buildozer.spec; then
@@ -62,9 +78,9 @@ jobs:
         
         # Add NFC permissions for our NFC functionality
         if ! grep -q "android.permissions" buildozer.spec; then
-          echo "android.permissions = INTERNET,ACCESS_NETWORK_STATE,NFC,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE" >> buildozer.spec
+          echo "android.permissions = INTERNET,ACCESS_NETWORK_STATE,NFC,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,CALL_PHONE" >> buildozer.spec
         else
-          sed -i 's/^android\.permissions = .*/android.permissions = INTERNET,ACCESS_NETWORK_STATE,NFC,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE/' buildozer.spec
+          sed -i 's/^android\.permissions = .*/android.permissions = INTERNET,ACCESS_NETWORK_STATE,NFC,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,CALL_PHONE/' buildozer.spec
         fi
         
         # Set app metadata for our enhanced version
@@ -74,7 +90,7 @@ jobs:
         sed -i 's/^version = .*/version = 2.0/' buildozer.spec
         
         echo "📋 Final buildozer.spec configuration:"
-        grep -E "title|package\.|version|android\.(api|sdk|ndk|minapi|archs|build_tools|enable_androidx|permissions)|requirements" buildozer.spec
+        grep -E "title|package\.|version|android\.(api|sdk|ndk|minapi|archs|build_tools|enable_androidx|permissions)|requirements|source\.include" buildozer.spec
     
     - name: Build Enhanced APK using Docker
       working-directory: Android
