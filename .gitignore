@@ -24,6 +24,10 @@ var/
 venv/
 ENV/
 
+# Portable Python distributions (installed by scripts)
+python/
+portable_python/
+
 # IDE files
 .idea/
 .vscode/
