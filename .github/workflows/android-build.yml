@@ -79,6 +79,11 @@ jobs:
           sed -i 's/^source\.include_patterns = .*/source.include_patterns = assets\/*,config\/*/' buildozer.spec
         fi
         
+        # CRITICAL: Also copy config files to root directory as fallback
+        echo "📁 Copying config files to root directory as fallback..."
+        cp -r config/* ./ 2>/dev/null || echo "Config copy failed (may not exist)"
+        ls -la *.json || echo "No JSON files in root"
+        
         # Enable AndroidX and other modern Android features
         if ! grep -q "android.enable_androidx" buildozer.spec; then
           echo "android.enable_androidx = True" >> buildozer.spec

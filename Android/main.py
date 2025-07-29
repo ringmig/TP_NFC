@@ -414,9 +414,27 @@ class TPNFCApp(App):
     def init_google_sheets(self):
         """Initialize Google Sheets service and load guest data"""
         try:
-            # Load config - use Android-aware path
-            config_path = self.get_resource_path('config/config.json')
-            self.logger.info(f"Looking for config at: {config_path}")
+            # Try multiple config file locations
+            config_paths = [
+                self.get_resource_path('config/config.json'),  # Android subdirectory
+                self.get_resource_path('config.json'),         # Android root
+                'config/config.json',                          # Desktop subdirectory
+                'config.json'                                  # Desktop root
+            ]
+            
+            config_path = None
+            for path in config_paths:
+                self.logger.info(f"Trying config at: {path}")
+                if os.path.exists(path):
+                    config_path = path
+                    self.logger.info(f"✅ Found config at: {config_path}")
+                    break
+                else:
+                    self.logger.info(f"❌ Not found at: {path}")
+            
+            if not config_path:
+                raise FileNotFoundError("Config file not found in any expected location")
+                
             with open(config_path, 'r') as f:
                 config = json.load(f)
             
