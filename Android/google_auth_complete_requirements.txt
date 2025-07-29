@@ -1,0 +1,103 @@
+# COMPLETE GOOGLE AUTHENTICATION DEPENDENCIES FOR ANDROID APK BUILD
+# Generated based on dependency tree analysis - July 2025
+# 
+# This includes ALL direct and transitive dependencies needed for:
+# - google-api-python-client
+# - google-auth
+# - google-auth-oauthlib
+# - google-auth-httplib2
+
+# =============================================================================
+# PRIMARY GOOGLE PACKAGES
+# =============================================================================
+google-api-python-client>=2.0.0
+google-auth>=2.15.0,<3.0.0,!=2.24.0,!=2.25.0
+google-auth-oauthlib>=0.5.0
+google-auth-httplib2>=0.2.0,<1.0.0
+
+# =============================================================================
+# DIRECT DEPENDENCIES (from setup.py analysis)
+# =============================================================================
+
+# From google-api-python-client
+httplib2>=0.19.0,<1.0.0
+google-api-core>=1.31.5,<3.0.0,!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.0
+uritemplate>=3.0.1,<5
+
+# From google-auth
+cachetools>=2.0.0,<7.0
+pyasn1-modules>=0.2.1
+rsa>=3.1.4,<5
+
+# From google-auth-oauthlib
+requests-oauthlib>=0.7.0
+
+# From google-auth-httplib2 (already covered above)
+# google-auth>=1.32.0,<3.0.0
+# httplib2>=0.19.0,<1.0.0
+
+# =============================================================================
+# TRANSITIVE DEPENDENCIES
+# =============================================================================
+
+# From pyasn1-modules
+pyasn1>=0.1.7
+
+# From requests-oauthlib
+requests>=2.20.0,<3.0.0
+oauthlib>=3.0.0
+
+# From google-api-core
+googleapis-common-protos>=1.6.0,<2.0.0
+protobuf>=3.19.5,!=3.20.0,!=3.20.1,!=4.21.0,!=4.21.1,!=4.21.2,!=4.21.3,!=4.21.4,!=4.21.5
+
+# =============================================================================
+# OPTIONAL EXTRAS (commonly needed)
+# =============================================================================
+
+# For HTTPS/SSL support (usually included in Python but may need explicit inclusion on Android)
+certifi
+urllib3
+
+# For JSON Web Token support (often needed for Google Auth)
+PyJWT>=2.0
+
+# For cryptography operations (may be needed for certain auth flows)
+cryptography>=38.0.3
+
+# =============================================================================
+# ANDROID-SPECIFIC CONSIDERATIONS
+# =============================================================================
+
+# Standard library modules that may need explicit inclusion for Android/Buildozer:
+# - json (usually built-in)
+# - pickle (used by google-auth for token storage)
+# - base64 (used for encoding)
+# - hashlib (used for cryptographic operations)
+# - datetime (used for timestamp operations)
+# - logging (used throughout)
+# - pathlib (or pathlib2 for older Python)
+# - threading (used for concurrent operations)
+# - socket (for network operations)
+# - ssl (for secure connections)
+
+# Pathlib backport for older Python versions
+pathlib2>=2.3.0
+
+# Six for Python 2/3 compatibility (may be needed by some packages)
+six>=1.10.0
+
+# =============================================================================
+# BUILDOZER-SPECIFIC INCLUSIONS
+# =============================================================================
+# Add these to your buildozer.spec requirements line:
+# requirements = python3,kivy,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa,requests-oauthlib,requests,oauthlib,pyasn1,googleapis-common-protos,protobuf,certifi,urllib3,PyJWT,cryptography,pathlib2,six
+
+# =============================================================================
+# VERSION NOTES
+# =============================================================================
+# Python support: 3.7+ (3.8+ recommended for google-auth latest versions)
+# Last updated: July 2025
+# 
+# Note: Some packages may have been updated since this analysis.
+# Always check PyPI for the latest versions and compatibility.

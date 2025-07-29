@@ -1,0 +1,92 @@
+# BUILDOZER REQUIREMENTS LINE FOR GOOGLE AUTHENTICATION
+# Complete dependency list for buildozer.spec requirements parameter
+# Generated from comprehensive dependency tree analysis - July 2025
+
+# =============================================================================
+# COPY THIS LINE TO YOUR buildozer.spec FILE
+# =============================================================================
+# Replace your current requirements line with this complete list:
+
+requirements = python3,kivy==2.1.0,kivymd,pillow,requests,plyer,pyjnius,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa,requests-oauthlib,oauthlib,pyasn1,googleapis-common-protos,protobuf,certifi,urllib3,PyJWT,cryptography,pathlib2,six
+
+# =============================================================================
+# ALTERNATIVE: MINIMAL CORE SET (if the above causes conflicts)
+# =============================================================================
+# If you encounter build conflicts, try this minimal set first:
+
+# requirements = python3,kivy==2.1.0,kivymd,pillow,requests,plyer,pyjnius,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,cachetools,pyasn1-modules,rsa,httplib2,uritemplate
+
+# =============================================================================
+# PACKAGE BREAKDOWN BY CATEGORY
+# =============================================================================
+
+# CORE KIVY/ANDROID:
+# python3,kivy==2.1.0,kivymd,pillow,requests,plyer,pyjnius
+
+# GOOGLE AUTH CORE:
+# google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2
+
+# GOOGLE AUTH DEPENDENCIES:
+# httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa
+
+# OAUTH DEPENDENCIES:
+# requests-oauthlib,oauthlib
+
+# ASN1/CRYPTO DEPENDENCIES:
+# pyasn1,googleapis-common-protos,protobuf
+
+# HTTP/SSL DEPENDENCIES:
+# certifi,urllib3
+
+# OPTIONAL ENHANCEMENTS:
+# PyJWT,cryptography,pathlib2,six
+
+# =============================================================================
+# TROUBLESHOOTING NOTES
+# =============================================================================
+
+# If you get "No module named X" errors during build:
+# 1. Add the missing module to the requirements line
+# 2. Check if it's a standard library module that needs explicit inclusion
+# 3. Verify Python version compatibility (use Python 3.8+ for best results)
+
+# Common missing modules that may need explicit inclusion:
+# - json (built-in, but sometimes needs explicit inclusion)
+# - pickle (used by google-auth for token storage)
+# - base64 (used for encoding operations)
+# - hashlib (used for cryptographic hashing)
+# - datetime (used for timestamp operations)
+# - threading (used for concurrent operations)
+# - socket (used for network operations)
+# - ssl (used for secure HTTPS connections)
+
+# If you encounter version conflicts:
+# 1. Remove version constraints (e.g., use 'requests' instead of 'requests>=2.20.0')
+# 2. Let buildozer resolve versions automatically
+# 3. Use the minimal core set above and add packages incrementally
+
+# =============================================================================
+# TESTING YOUR BUILD
+# =============================================================================
+
+# After updating your buildozer.spec:
+# 1. Clean previous builds: rm -rf .buildozer/
+# 2. Build: buildozer android debug
+# 3. Test imports in Python before building:
+#    python -c "import google.auth; import googleapiclient.discovery; print('Google Auth imports successful')"
+
+# =============================================================================
+# STANDARD LIBRARY MODULES FOR ANDROID
+# =============================================================================
+# These are typically included automatically but may need explicit inclusion:
+# 
+# Built-in modules that Google Auth libraries use:
+# - json, pickle, base64, hashlib, datetime, logging
+# - threading, socket, ssl, urllib, http
+# - pathlib (or use pathlib2 backport)
+# - typing (for type hints)
+# - contextlib, functools, itertools
+# - collections, copy, weakref
+
+# Note: Most of these are included automatically by python-for-android,
+# but if you encounter "No module named X" errors, add them to requirements.

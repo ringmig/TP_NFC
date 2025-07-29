@@ -58,13 +58,15 @@ jobs:
         sed -i 's/^android\.build_tools = .*/android.build_tools = 31.0.0/' buildozer.spec
         sed -i 's/^android\.archs = .*/android.archs = arm64-v8a,armeabi-v7a/' buildozer.spec # Multi-arch for better compatibility
         
-        # CRITICAL: Include all required Python dependencies
+        # CRITICAL: Include ALL required Python dependencies (30+ modules)
         # Base: kivy, kivymd, plyer
-        # Google Auth: google-api-python-client, google-auth, google-auth-oauthlib, google-auth-httplib2
-        # Google Auth Dependencies: cachetools, pyasn1, pyasn1-modules, rsa
-        # HTTP/Network: requests, urllib3, certifi, charset-normalizer, idna, httplib2
-        # Utilities: filetype, six, pyparsing
-        sed -i 's/^requirements = .*/requirements = python3,kivy==2.3.1,kivymd,plyer,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,filetype,cachetools,requests,urllib3,certifi,charset-normalizer,idna,httplib2,pyparsing,pyasn1,pyasn1-modules,rsa,six,requests-oauthlib,oauthlib/' buildozer.spec
+        # Google Auth Core: google-api-python-client, google-auth, google-auth-oauthlib, google-auth-httplib2
+        # Google API Dependencies: httplib2, google-api-core, uritemplate, googleapis-common-protos, protobuf
+        # OAuth Dependencies: requests-oauthlib, oauthlib
+        # Crypto/Auth: pyasn1, pyasn1-modules, rsa, PyJWT, cryptography, cachetools
+        # HTTP/Network: requests, urllib3, certifi, charset-normalizer, idna
+        # Utilities: filetype, six, pyparsing, pathlib2
+        sed -i 's/^requirements = .*/requirements = python3,kivy==2.3.1,kivymd,plyer,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa,requests-oauthlib,oauthlib,pyasn1,googleapis-common-protos,protobuf,certifi,urllib3,PyJWT,cryptography,pathlib2,six,filetype,requests,charset-normalizer,idna,pyparsing/' buildozer.spec
         
         # CRITICAL: Include JSON and other data files in the APK
         sed -i 's/^source\.include_exts = .*/source.include_exts = py,png,jpg,kv,atlas,json,txt/' buildozer.spec

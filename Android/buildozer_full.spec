@@ -19,7 +19,7 @@ source.include_exts = py,png,jpg,kv,atlas,json
 version = 1.0.0
 
 # (list) Application requirements
-requirements = python3,kivy==2.1.0,kivymd,pillow,requests,plyer,pyjnius
+requirements = python3,kivy==2.1.0,kivymd,pillow,requests,plyer,pyjnius,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa,requests-oauthlib,oauthlib,pyasn1,googleapis-common-protos,protobuf,certifi,urllib3,PyJWT,cryptography,pathlib2,six
 
 # (str) Supported orientation (landscape, portrait or all)
 orientation = portrait
