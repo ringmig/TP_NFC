@@ -28,6 +28,13 @@ import json
 import logging
 from pathlib import Path
 
+# Check if running on Android
+try:
+    from jnius import autoclass
+    ANDROID = True
+except ImportError:
+    ANDROID = False
+
 # Import services from Android folder
 from src.services.google_sheets_service import GoogleSheetsService
 from src.models.guest_record import GuestRecord
@@ -388,14 +395,28 @@ class TPNFCApp(App):
         super().__init__(**kwargs)
         self.sheets_service = None
         self.guest_data = []
-        self.logger = logging.getLogger('TPNFCApp')
-        logging.basicConfig(level=logging.INFO)
-        
+    
+    def get_resource_path(self, relative_path):
+        """Get correct file path for Android vs desktop"""
+        if ANDROID:
+            # On Android, files are in the app's private directory
+            try:
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                app_dir = PythonActivity.mActivity.getFilesDir().getAbsolutePath()
+                return os.path.join(app_dir, 'app', relative_path)
+            except Exception:
+                # Fallback to relative path if Android detection fails
+                return relative_path
+        else:
+            # Desktop - use relative path
+            return relative_path
+    
     def init_google_sheets(self):
         """Initialize Google Sheets service and load guest data"""
         try:
-            # Load config
-            config_path = Path('config/config.json')
+            # Load config - use Android-aware path
+            config_path = self.get_resource_path('config/config.json')
+            self.logger.info(f"Looking for config at: {config_path}")
             with open(config_path, 'r') as f:
                 config = json.load(f)
             
@@ -426,6 +447,10 @@ class TPNFCApp(App):
             return False
     
     def build(self):
+        # Initialize logging
+        self.logger = logging.getLogger('TPNFCApp')
+        logging.basicConfig(level=logging.INFO)
+        
         # Initialize current station early
         self.current_station = 'Reception'
         
@@ -457,13 +482,11 @@ class TPNFCApp(App):
         header.bind(size=self._update_header_bg, pos=self._update_header_bg)
         
         # Logo image - left aligned with NO PADDING
-        # Try different logo paths (APK vs development)
-        logo_paths = ['assets/logo.png', os.path.join('..', 'assets', 'logo.png')]
-        logo_path = None
-        for path in logo_paths:
-            if os.path.exists(path):
-                logo_path = path
-                break
+        # Get logo path using Android-aware method
+        logo_path = self.get_resource_path('assets/logo.png')
+        # Fallback to development path if not found
+        if not os.path.exists(logo_path):
+            logo_path = os.path.join('..', 'assets', 'logo.png')
         
         if logo_path:
             logo = Image(

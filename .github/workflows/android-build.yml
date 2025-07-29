@@ -66,12 +66,13 @@ jobs:
         # Crypto/Auth: pyasn1, pyasn1-modules, rsa, PyJWT, cryptography, cachetools
         # HTTP/Network: requests, urllib3, certifi, charset-normalizer, idna
         # Utilities: filetype, six, pyparsing, pathlib2
-        sed -i 's/^requirements = .*/requirements = python3,kivy==2.3.1,kivymd,plyer,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa,requests-oauthlib,oauthlib,pyasn1,googleapis-common-protos,protobuf,certifi,urllib3,PyJWT,cryptography,pathlib2,six,filetype,requests,charset-normalizer,idna,pyparsing/' buildozer.spec
+        sed -i 's/^requirements = .*/requirements = python3,kivy==2.3.1,kivymd,plyer,pyjnius,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa,requests-oauthlib,oauthlib,pyasn1,googleapis-common-protos,protobuf,certifi,urllib3,PyJWT,cryptography,pathlib2,six,filetype,requests,charset-normalizer,idna,pyparsing/' buildozer.spec
         
         # CRITICAL: Include JSON, assets, and other data files in the APK
         sed -i 's/^source\.include_exts = .*/source.include_exts = py,png,jpg,kv,atlas,json,txt/' buildozer.spec
         
         # CRITICAL: Include assets directory (logo) and config directory
+        # Use correct buildozer pattern syntax (no spaces after commas)
         if ! grep -q "source.include_patterns" buildozer.spec; then
           echo "source.include_patterns = assets/*,config/*" >> buildozer.spec
         else
