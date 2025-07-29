@@ -6,11 +6,11 @@
 #   ./install_apk.sh full      - Install full app APK from bin/
 
 # Check for APK argument or use default
-if [ "$1" == "enhanced" ]; then
-    # Use new enhanced features APK from bin directory
+if [ "$1" == "enhanced" ] || [ "$1" == "production" ]; then
+    # Use production APK from bin directory
     APK_PATH="../bin/tpnfcenhanced-2.0-arm64-v8a_armeabi-v7a-debug.apk"
     if [ ! -f "$APK_PATH" ]; then
-        echo "❌ Enhanced features APK not found at $APK_PATH"
+        echo "❌ Production APK not found at $APK_PATH"
         exit 1
     fi
     PACKAGE_NAME="com.tpnfc.tpnfcenhanced"
