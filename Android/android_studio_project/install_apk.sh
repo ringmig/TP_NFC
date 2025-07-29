@@ -1,10 +1,23 @@
 #!/bin/bash
 # Script to install the TP_NFC APK for testing
+# Usage: 
+#   ./install_apk.sh           - Install test APK (default)
+#   ./install_apk.sh enhanced  - Install enhanced features APK from bin/
+#   ./install_apk.sh full      - Install full app APK from bin/
 
 # Check for APK argument or use default
-if [ "$1" == "full" ]; then
-    # Look for the full app APK in bin directory
-    APK_PATH=$(ls ../bin/*-debug.apk 2>/dev/null | head -1)
+if [ "$1" == "enhanced" ]; then
+    # Use new enhanced features APK from bin directory
+    APK_PATH="../bin/tpnfcenhanced-2.0-arm64-v8a_armeabi-v7a-debug.apk"
+    if [ ! -f "$APK_PATH" ]; then
+        echo "❌ Enhanced features APK not found at $APK_PATH"
+        exit 1
+    fi
+    PACKAGE_NAME="com.tpnfc.tpnfcenhanced"
+    ACTIVITY_NAME="org.kivy.android.PythonActivity"
+elif [ "$1" == "full" ]; then
+    # Look for other full app APKs in bin directory
+    APK_PATH=$(ls ../bin/*-debug.apk 2>/dev/null | grep -v "tpnfcenhanced" | head -1)
     if [ -z "$APK_PATH" ]; then
         echo "❌ Full app APK not found. Run build_full_app.sh first."
         exit 1
@@ -12,7 +25,7 @@ if [ "$1" == "full" ]; then
     PACKAGE_NAME="com.ringmig.tpnfc.tpnfc"
     ACTIVITY_NAME="org.kivy.android.PythonActivity"
 else
-    # Use test APK
+    # Use test APK (default)
     APK_PATH="../apk/test_01.apk"
     PACKAGE_NAME="org.example.testapp"
     ACTIVITY_NAME="org.kivy.android.PythonActivity"
