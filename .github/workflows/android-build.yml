@@ -66,7 +66,7 @@ jobs:
         # Crypto/Auth: pyasn1, pyasn1-modules, rsa, PyJWT, cryptography, cachetools
         # HTTP/Network: requests, urllib3, certifi, charset-normalizer, idna
         # Utilities: filetype, six, pyparsing, pathlib2
-        sed -i 's/^requirements = .*/requirements = python3,kivy==2.3.1,kivymd,plyer,pyjnius,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa,requests-oauthlib,oauthlib,pyasn1,googleapis-common-protos,protobuf,certifi,urllib3,PyJWT,cryptography,pathlib2,six,filetype,requests,charset-normalizer,idna,pyparsing/' buildozer.spec
+        sed -i 's/^requirements = .*/requirements = python3,kivy==2.3.1,kivymd,plyer,pyjnius,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa,requests-oauthlib,oauthlib,pyasn1,googleapis-common-protos,protobuf,certifi,urllib3,PyJWT,cryptography,pathlib2,six,filetype,requests,charset-normalizer,idna,pyparsing,oauth2client/' buildozer.spec
         
         # CRITICAL: Include JSON, assets, and other data files in the APK
         sed -i 's/^source\.include_exts = .*/source.include_exts = py,png,jpg,kv,atlas,json,txt/' buildozer.spec
@@ -83,9 +83,13 @@ jobs:
         echo "${{ secrets.TOKEN_JSON }}" | base64 -d > token.json
         echo "${{ secrets.CONFIG_JSON }}" | base64 -d > config.json
         
-        # Update config.json to remove "config/" prefix from paths
+        # Update config.json to remove "config/" prefix from paths  
         sed -i 's|"config/credentials.json"|"credentials.json"|g' config.json
         sed -i 's|"config/token.json"|"token.json"|g' config.json
+        
+        # Also update credentials_file and token_file paths
+        sed -i 's|"credentials_file": "config/credentials.json"|"credentials_file": "credentials.json"|g' config.json
+        sed -i 's|"token_file": "config/token.json"|"token_file": "token.json"|g' config.json
         
         echo "✅ Config files created from secrets"
         ls -la *.json
@@ -110,6 +114,8 @@ jobs:
             echo "📝 Updating config.json paths to point to same directory as main.py..."
             sed -i 's|"config/credentials.json"|"credentials.json"|g' config.json
             sed -i 's|"config/token.json"|"token.json"|g' config.json
+            sed -i 's|"credentials_file": "config/credentials.json"|"credentials_file": "credentials.json"|g' config.json
+            sed -i 's|"token_file": "config/token.json"|"token_file": "token.json"|g' config.json
             echo "✅ Updated config.json paths for same-directory inclusion"
           fi
           
@@ -141,11 +147,11 @@ jobs:
           sed -i 's/^android\.enable_androidx = .*/android.enable_androidx = True/' buildozer.spec
         fi
         
-        # Add NFC permissions for our NFC functionality
+        # Add NFC permissions for our NFC functionality + enhanced network permissions
         if ! grep -q "android.permissions" buildozer.spec; then
-          echo "android.permissions = INTERNET,ACCESS_NETWORK_STATE,NFC,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,CALL_PHONE" >> buildozer.spec
+          echo "android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,NFC,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,CALL_PHONE" >> buildozer.spec
         else
-          sed -i 's/^android\.permissions = .*/android.permissions = INTERNET,ACCESS_NETWORK_STATE,NFC,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,CALL_PHONE/' buildozer.spec
+          sed -i 's/^android\.permissions = .*/android.permissions = INTERNET,ACCESS_NETWORK_STATE,ACCESS_WIFI_STATE,NFC,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,CALL_PHONE/' buildozer.spec
         fi
         
         # Set app metadata for our enhanced version

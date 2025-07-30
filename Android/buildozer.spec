@@ -1,7 +1,7 @@
 [app]
 
 # (str) Title of your application
-title = TP NFC - Enhanced
+title = La Isla Bonita
 
 # (str) Package name
 package.name = tpnfcenhanced
@@ -30,6 +30,9 @@ fullscreen = 0
 
 # (str) Filename of the icon of the application
 icon.filename = logo.png
+
+# (str) Presplash of the application - use black image
+presplash.filename = presplash.png
 
 [buildozer]
 
@@ -68,6 +71,9 @@ android.archs = arm64-v8a,armeabi-v7a
 
 # (str) Android entry point, default is ok for Kivy-based app
 android.entrypoint = org.kivy.android.PythonActivity
+
+# (str) Presplash background color (use #RRGGBB format) - dark grey to match app
+android.presplash_color = #191919
 
 # (bool) Enable AndroidX support. Enable when 'android.gradle_dependencies'
 # contains an 'androidx' package, or any package from Kotlin source.
@@ -191,4 +197,7 @@ ios.codesign.allowed = false
 #ios.codesign.debug = "iPhone Developer: <lastname> <firstname> (<hexstring>)"
 
 # (str) Name of the certificate to use for signing the release version
-#ios.codesign.release = %(ios.codesign.debug)sandroid.permissions = INTERNET,ACCESS_NETWORK_STATE,NFC,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,CALL_PHONE
+#ios.codesign.release = %(ios.codesign.debug)s
+
+# (list) Android application permissions
+android.permissions = INTERNET,ACCESS_NETWORK_STATE,NFC,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,CALL_PHONE

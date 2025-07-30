@@ -16,7 +16,11 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 import pickle
 
-from ..models import GuestRecord
+try:
+    from ..models import GuestRecord
+except ImportError:
+    # Fallback for Android APK context
+    from models.guest_record import GuestRecord
 
 
 class GoogleSheetsService:
