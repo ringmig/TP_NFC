@@ -1814,6 +1814,11 @@ class NFCApp(ctk.CTk):
         else:
             # All stations including Reception use checkpoint mode
             self.create_checkpoint_content()
+            # Force NFC connection check and update for Reception
+            if self.current_station == "Reception":
+                # Check NFC connection status immediately
+                self._nfc_connected = self.nfc_service.is_connected
+                self._safe_configure_checkpoint_status()
 
 
 
@@ -2125,6 +2130,8 @@ class NFCApp(ctk.CTk):
         )
         self.rewrite_id_entry.pack(side="left", padx=(0, 10))
         self.rewrite_id_entry.bind("<Return>", lambda e: self.rewrite_to_band())
+        self.rewrite_id_entry.bind("<KeyRelease>", lambda e: self._update_register_mode_guest_name())
+        self.rewrite_id_entry.bind("<FocusOut>", lambda e: self._update_register_mode_guest_name())
 
         # Rewrite button
         self.rewrite_btn = ctk.CTkButton(
@@ -2196,7 +2203,7 @@ class NFCApp(ctk.CTk):
         center_frame = ctk.CTkFrame(self.content_frame, fg_color="transparent")
         center_frame.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Waiting label - check NFC connection status
+        # Waiting label - check NFC connection status  
         if self._nfc_connected:
             status_text = self.STATUS_WAITING_FOR_CHECKIN
             status_color = "#ffffff"
@@ -4108,9 +4115,9 @@ class NFCApp(ctk.CTk):
                 station_frame = self.station_buttons_container.master
                 self.register_mode_label = ctk.CTkLabel(
                     station_frame,
-                    text="Check-in Paused",
+                    text="",
                     font=CTkFont(size=18, weight="bold"),
-                    text_color="#ff9800"
+                    text_color="#4CAF50"  # Green text
                 )
             self.register_mode_label.pack(side="left")
         else:
@@ -4120,6 +4127,48 @@ class NFCApp(ctk.CTk):
             
             if hasattr(self, 'register_mode_label'):
                 self.register_mode_label.pack_forget()
+
+    def _update_register_mode_guest_name(self):
+        """Update the register mode label with current guest name."""
+        if not hasattr(self, 'register_mode_label') or not self.is_rewrite_mode:
+            return
+            
+        try:
+            # Get current guest ID from the rewrite entry field
+            guest_id_text = self.rewrite_id_entry.get().strip() if hasattr(self, 'rewrite_id_entry') else ""
+            
+            if not guest_id_text:
+                # No ID entered - show nothing
+                self.register_mode_label.configure(text="")
+                return
+            
+            # Validate ID format
+            try:
+                guest_id = int(guest_id_text)
+            except ValueError:
+                # Invalid ID format - show nothing
+                self.register_mode_label.configure(text="")
+                return
+            
+            # Look up guest in cached data
+            guest = None
+            if hasattr(self, 'guests_data'):
+                for g in self.guests_data:
+                    if g.original_id == guest_id:
+                        guest = g
+                        break
+            
+            if guest:
+                # Found guest - show full name
+                full_name = f"{guest.firstname} {guest.lastname}".strip()
+                self.register_mode_label.configure(text=full_name)
+            else:
+                # Guest not found - show nothing
+                self.register_mode_label.configure(text="")
+                
+        except Exception as e:
+            self.logger.error(f"Error updating register mode guest name: {e}")
+            self.register_mode_label.configure(text="")
 
     def rewrite_tag(self):
         """Enter register tag mode."""
@@ -4153,6 +4202,9 @@ class NFCApp(ctk.CTk):
             self._update_guest_table_silent(self.guests_data)
         # Keep status bar clear in rewrite mode - "Check-in Paused" shown in stations frame
         self.update_status("", "normal")
+        
+        # Update the register mode guest name display
+        self._update_register_mode_guest_name()
 
 
     def on_station_button_click(self, station: str):
@@ -5795,6 +5847,8 @@ class NFCApp(ctk.CTk):
                 # Fill rewrite form
                 self.rewrite_id_entry.delete(0, 'end')
                 self.rewrite_id_entry.insert(0, str(guest_id))
+                # Update the header guest name display
+                self._update_register_mode_guest_name()
             elif self.checkin_buttons_visible:
                 # Fill manual check-in form
                 self.manual_id_entry.delete(0, 'end')
@@ -5818,6 +5872,8 @@ class NFCApp(ctk.CTk):
                 # Fill rewrite form
                 self.rewrite_id_entry.delete(0, 'end')
                 self.rewrite_id_entry.insert(0, str(guest_id))
+                # Update the header guest name display
+                self._update_register_mode_guest_name()
             elif self.checkin_buttons_visible:
                 # Fill manual check-in form
                 self.manual_id_entry.delete(0, 'end')
