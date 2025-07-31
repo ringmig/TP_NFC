@@ -622,7 +622,43 @@ class TagManager:
 
     def clear_all_sheets_data(self) -> bool:
         """Clear all check-in data from Google Sheets."""
-        return self.sheets_service.clear_all_check_in_data()
+        success = self.sheets_service.clear_all_check_in_data()
+        if success:
+            # Also clear all tag registrations since wristband data was cleared
+            self.tag_registry.clear()
+            self.save_registry()
+            self.logger.info("Cleared all tag registrations along with Google Sheets data")
+        return success
+
+    def sync_tag_registry_with_sheets(self, guests_data: List) -> None:
+        """Sync local tag registry with wristband data from Google Sheets."""
+        try:
+            # Build a mapping of current wristband UUIDs to guest IDs from Google Sheets
+            sheets_wristbands = {}
+            for guest in guests_data:
+                if hasattr(guest, 'wristband_uuid') and guest.wristband_uuid:
+                    sheets_wristbands[guest.wristband_uuid] = guest.original_id
+            
+            # Find tags in local registry that are no longer in Google Sheets
+            tags_to_remove = []
+            for tag_uid, guest_id in self.tag_registry.items():
+                # If this tag is not in the sheets data, or points to different guest, remove it
+                if tag_uid not in sheets_wristbands or sheets_wristbands[tag_uid] != guest_id:
+                    tags_to_remove.append(tag_uid)
+            
+            # Remove orphaned tags
+            if tags_to_remove:
+                for tag_uid in tags_to_remove:
+                    old_guest_id = self.tag_registry.pop(tag_uid, None)
+                    self.logger.info(f"Removed orphaned tag {tag_uid} (was registered to guest {old_guest_id})")
+                
+                self.save_registry()
+                self.logger.info(f"Synced tag registry: removed {len(tags_to_remove)} orphaned tag(s)")
+            else:
+                self.logger.debug("Tag registry sync: no orphaned tags found")
+                
+        except Exception as e:
+            self.logger.error(f"Error syncing tag registry with sheets: {e}")
 
     def shutdown(self) -> None:
         """Clean shutdown of tag manager."""

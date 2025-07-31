@@ -11,7 +11,7 @@ from datetime import datetime
 class GuestRecord:
     """Model representing a guest record from the spreadsheet."""
     
-    def __init__(self, original_id: int, firstname: str, lastname: str, stations: List[str] = None, mobile_number: str = None):
+    def __init__(self, original_id: int, firstname: str, lastname: str, stations: List[str] = None, mobile_number: str = None, wristband_uuid: str = None):
         """
         Initialize guest record.
         
@@ -21,12 +21,14 @@ class GuestRecord:
             lastname: Guest's last name
             stations: List of station names to initialize (if None, uses default stations)
             mobile_number: Guest's mobile phone number
+            wristband_uuid: Wristband UUID from column E
         """
         self.original_id = original_id
         self.firstname = firstname
         self.lastname = lastname
         self.full_name = f"{firstname} {lastname}"
         self.mobile_number = mobile_number
+        self.wristband_uuid = wristband_uuid
         
         # Station check-ins (station_name -> timestamp string or datetime)
         # Initialize with provided stations or default hardcoded ones

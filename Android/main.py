@@ -431,14 +431,13 @@ class TPNFCApp(App):
         """Initialize Google Sheets service and load guest data"""
         try:
             # Try multiple config file locations
-            # UPDATED: Prioritize same directory as main.py (where config files are placed during build)
-            main_dir = os.path.dirname(os.path.abspath(__file__))
+            # Start with the correct relative path, then fallback to other locations
             config_paths = [
-                os.path.join(main_dir, 'config.json'),         # Same directory as main.py (BUILD LOCATION)
-                self.get_resource_path('config.json'),         # Android app directory
-                self.get_resource_path('config/config.json'),  # Android subdirectory 
-                'config.json',                                 # Desktop root
-                'config/config.json'                           # Desktop subdirectory
+                'config/config.json',                          # Correct location - check first
+                'config.json',                                 # Fallback - root directory
+                self.get_resource_path('config/config.json'),  # Android subdirectory resource
+                self.get_resource_path('config.json'),         # Android app directory resource
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.json')  # Same dir as main.py
             ]
             
             config_path = None

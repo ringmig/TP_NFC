@@ -44,20 +44,25 @@ C:\src\git\TP_NFC\
 ## RECENT_MODIFICATIONS
 
 LAST_SESSION_CHANGES:
-1. Guest name display feature (lines 1785-1800, 2360-2403 in app.py)
+1. TreeView width fix for registration mode (lines 4462-4520 in app.py)
+   - ISSUE: Registration mode TreeView only used 45-60% of screen width, leaving empty space
+   - METHOD: `_force_treeview_update()` at line 4462
+   - SOLUTION: Removed explicit width constraints, used natural container expansion
+   - COLUMN_CONFIG: Matched single station mode exactly (no stretch parameters)
+   - RESULT: TreeView now uses full width with proper column proportions
+
+2. Column configuration standardization (lines 4511-4514, 4471-4474)
+   - REGISTRATION_MODE: id(80/60), first(150/100), last(150/100), wristband(200/150)
+   - SINGLE_STATION: id(80/60), first(150/100), last(150/100), station(200/150)
+   - CONSISTENCY: Both modes use identical sizing and anchor settings
+   - NO_STRETCH: Removed explicit stretch parameters to match default behavior
+
+3. Previous guest name display feature (lines 1785-1800, 2360-2403 in app.py)
    - METHOD: `_on_guest_id_change()` at line 2360
    - OPTIMIZATION: Changed from `sheets_service.find_guest_by_id()` to `self.guests_data` loop
    - PERFORMANCE: ~1000ms → ~5ms lookup time
    - UI_LOCATION: Above ID entry field, 36pt font
    - AUTO_CLEAR: Integrated with 15-second timer at line 4589
-
-2. Fixed auto-clear to include guest name (line 4597)
-   - METHOD: `_auto_clear_id_field()`
-   - ADDED: `self.safe_update_widget('guest_name_label', lambda w: w.configure(text=""))`
-
-3. UI positioning adjustments (lines 1793-1804)
-   - REMOVED: Empty instruction label that was pushing content up
-   - PADDING: `pady=(0, 25)` between name and ID field
 
 ## CRITICAL_STATE_VARIABLES
 
@@ -76,6 +81,12 @@ THREAD_SAFETY_REQUIREMENTS:
 ## KEY_METHOD_SIGNATURES
 
 ```python
+# TreeView width forcing for registration mode (line 4462)
+def _force_treeview_update(self):
+    # Forces registration mode TreeView to use full width
+    # Matches single station mode column configuration exactly
+    # Called with 1ms delay after TreeView packing
+
 # Guest name display optimization (line 2360)
 def _on_guest_id_change(self, event=None):
     # Uses self.guests_data instead of API call

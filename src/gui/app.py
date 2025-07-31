@@ -106,7 +106,7 @@ class NFCApp(ctk.CTk):
     # Status message constants
     STATUS_READY_REGISTRATION = ""
     STATUS_READY_WAITING_FOR_CHECKIN = "Check-in service running in the background..."
-    STATUS_WAITING_FOR_CHECKIN = "Waiting on check-in..."
+    STATUS_WAITING_FOR_CHECKIN = "Waiting for check-in..."
     STATUS_READY_CHECKIN = ""
     STATUS_CHECKIN_PAUSED = "Check-in Paused"
     STATUS_NFC_NOT_CONNECTED = "NFC READER NOT CONNECTED"
@@ -154,8 +154,8 @@ class NFCApp(ctk.CTk):
         # State
         self.current_station = "Reception"
         self.logger.info(f"Starting at station: {self.current_station}")
-        self.is_registration_mode = True
-        self.is_checkpoint_mode = True  # Reception has both registration UI and checkpoint scanning
+        self.is_registration_mode = False  # Reception is now checkpoint-only
+        self.is_checkpoint_mode = True  # All stations are checkpoint stations
         self.guest_list_visible = False
         self.checkin_buttons_visible = False  # Hidden by default
         self.show_all_stations = True  # False = current station only
@@ -177,6 +177,7 @@ class NFCApp(ctk.CTk):
         self._active_operations = 0  # Track active operations
         self.is_refreshing = False  # Flag to prevent concurrent refreshes
         self._rewrite_check_operation_active = False  # Track rewrite countdown operation
+        self._rewrite_countdown_timer = None  # Timer for register countdown
         self._nfc_operation_lock = False  # Global lock to prevent concurrent NFC operations
         self._sheets_refresh_lock = threading.Lock()  # Prevent concurrent Google Sheets API calls
         
@@ -338,6 +339,10 @@ class NFCApp(ctk.CTk):
             # Update UI if in registration mode to hide elements
             if self.is_registration_mode and not self.settings_visible:
                 self.update_mode_content()
+        else:
+            # NFC is connected - show waiting for check-in message
+            if not self.is_registration_mode or self.is_checkpoint_mode:
+                self._update_status_with_correct_type()
             
         # Start periodic checking
         self.check_nfc_connection()
@@ -396,7 +401,8 @@ class NFCApp(ctk.CTk):
             return
             
         if self.is_rewrite_mode:
-            self.start_rewrite_tag_scanning()
+            # Register tag mode should NOT have background scanning
+            self.logger.debug("Skipping background scanning in register tag mode")
         else:
             # All stations (including Reception) use checkpoint scanning
             self.start_checkpoint_scanning()
@@ -1075,10 +1081,9 @@ class NFCApp(ctk.CTk):
         scrollbar = ctk.CTkScrollbar(table_container)
         scrollbar.pack(side="right", fill="y")
 
-        # Overview mode: show all stations
-        # Get stations for table columns (filtered by view mode)
+        # Columns will be set dynamically by _update_table_structure()
+        # Start with basic columns, will be updated based on mode
         available_stations = self._get_filtered_stations_for_view()
-        
         columns = ("id", "first", "last") + tuple(station.lower() for station in available_stations)
 
         # Fixed summary treeview (non-scrollable)
@@ -1112,7 +1117,7 @@ class NFCApp(ctk.CTk):
             tree.column("first", width=150, minwidth=100, anchor="w")
             tree.column("last", width=150, minwidth=100, anchor="w")
 
-            # Set headers and widths for all stations with responsive sizing and padding
+            # Station columns - will be configured by _update_table_structure()
             for i, station in enumerate(available_stations):
                 tree.heading(station.lower(), text=station, anchor="center")
                 tree.column(station.lower(), width=120, minwidth=80, anchor="center")
@@ -1236,9 +1241,7 @@ class NFCApp(ctk.CTk):
         # Hide copyright text
         self.copyright_label.place_forget()
 
-        # Hide status bar content only when Reception is in registration mode (keep frame visible)
-        if self.current_station == "Reception" and self.is_registration_mode and not self.is_checkpoint_mode:
-            self.status_label.configure(text="")
+        # Note: All stations are now checkpoint-only, no special status bar hiding needed
 
         # Main container
         main_container = ctk.CTkFrame(self.content_frame, fg_color="transparent")
@@ -1443,10 +1446,10 @@ class NFCApp(ctk.CTk):
         self.tag_info_btn.bind("<Leave>", on_tag_info_leave)
         self.tag_info_btn.pack(side="left")
 
-        # Rewrite Tag button
+        # Register Tag button
         self.rewrite_tag_btn = ctk.CTkButton(
             buttons_container,
-            text="Rewrite Tag",
+            text="Register Tag",
             command=self.rewrite_tag,
             width=200,
             height=50,
@@ -1584,7 +1587,13 @@ class NFCApp(ctk.CTk):
 
 
     def toggle_settings(self):
-        """Toggle settings panel visibility."""
+        """Toggle settings panel visibility or close register mode."""
+        # Handle register mode closing
+        if self.is_rewrite_mode:
+            self.logger.info("User clicked X button - closing register mode")
+            self.close_register_mode()
+            return
+            
         action = "open" if not self.settings_visible else "close"
         self.logger.info(f"User clicked Settings button - {action} settings panel")
         # Block settings toggle if operation is in progress
@@ -1606,7 +1615,7 @@ class NFCApp(ctk.CTk):
             self.update_mode_content()
             # Return to appropriate status
             if self.is_rewrite_mode:
-                self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
+                pass  # No status message needed - "Check-in Paused" shown in stations frame
             else:
                 self._update_status_with_correct_type()
         else:
@@ -1626,9 +1635,42 @@ class NFCApp(ctk.CTk):
 
     def update_settings_button(self):
         """Update settings button appearance based on state."""
-        if self.is_displaying_tag_info or self.is_rewrite_mode:
-            # Hide hamburger button completely when in tag info view or rewrite mode
+        if self.is_displaying_tag_info:
+            # Hide hamburger button completely when in tag info view
             self.settings_btn.pack_forget()
+        elif self.is_rewrite_mode:
+            # Show red X button in register mode
+            if not self.settings_btn.winfo_ismapped():
+                # Re-pack both elements in correct order to maintain layout
+                self.sync_status_label.pack_forget()
+                self.settings_btn.pack(side="right", padx=(0, 20))
+                self.sync_status_label.pack(side="right", padx=(0, 20))
+            self.settings_btn.configure(
+                text="✕",
+                border_width=2,
+                fg_color="transparent",
+                text_color="#dc3545",
+                border_color="#dc3545"
+            )
+            
+            # Add hover effects for X mode
+            def on_register_x_enter(event):
+                self.settings_btn.configure(
+                    fg_color="#dc3545",
+                    text_color="#212121"
+                )
+                    
+            def on_register_x_leave(event):
+                self.settings_btn.configure(
+                    fg_color="transparent",
+                    text_color="#dc3545"
+                )
+            
+            # Remove old bindings and add new ones
+            self.settings_btn.unbind("<Enter>")
+            self.settings_btn.unbind("<Leave>")
+            self.settings_btn.bind("<Enter>", on_register_x_enter)
+            self.settings_btn.bind("<Leave>", on_register_x_leave)
         elif self.settings_visible:
             # Ensure button is visible and update appearance for settings mode
             if not self.settings_btn.winfo_ismapped():
@@ -1769,12 +1811,11 @@ class NFCApp(ctk.CTk):
 
         if self.is_rewrite_mode:
             self.create_rewrite_content()
-        elif self.current_station == "Reception":
-            # Reception always shows registration UI with checkpoint scanning in background
-            self.create_registration_content()
         else:
-            # Other stations use checkpoint mode
+            # All stations including Reception use checkpoint mode
             self.create_checkpoint_content()
+
+
 
     def create_registration_content(self):
         """Create registration mode UI for Reception - always shows UI with background check-in scanning."""
@@ -1908,6 +1949,13 @@ class NFCApp(ctk.CTk):
         # Log successful tag detection
         self.logger.info(f"Tag detected for rewrite: {tag.uid}")
         
+        # Cancel any countdown timer since tag was detected
+        if self._rewrite_countdown_timer:
+            self.after_cancel(self._rewrite_countdown_timer)
+            self._rewrite_countdown_timer = None
+        self._rewrite_check_operation_active = False
+        self._hide_cancel_register_button()
+        
         # Tag detected - check if guest ID field is filled
         guest_id = self.rewrite_id_entry.get().strip() if hasattr(self, 'rewrite_id_entry') else ""
 
@@ -1915,12 +1963,12 @@ class NFCApp(ctk.CTk):
             # ID field is empty
             self._active_operations -= 1
             self.after(0, self.update_status, "Enter Guest ID first", "error")
-            self.after(3000, lambda: self.update_status(self.STATUS_CHECKIN_PAUSED, "warning"))
+            self.after(3000, lambda: self.update_status("", "normal"))
         else:
             # ID field has value
             self._active_operations -= 1
             self.after(0, self.update_status, "Press Rewrite Tag Button to begin", "info")
-            self.after(3000, lambda: self.update_status(self.STATUS_CHECKIN_PAUSED, "warning"))
+            self.after(3000, lambda: self.update_status("", "normal"))
 
         # Continue scanning after delay
         self.after(3500, self._rewrite_scan_loop)
@@ -2081,7 +2129,7 @@ class NFCApp(ctk.CTk):
         # Rewrite button
         self.rewrite_btn = ctk.CTkButton(
             entry_frame,
-            text="Rewrite Tag",
+            text="Register Tag",
             command=self.rewrite_to_band,
             width=120,
             height=50,
@@ -2090,7 +2138,8 @@ class NFCApp(ctk.CTk):
             border_width=2,
             fg_color="transparent",
             text_color="#ff9800",
-            border_color="#ff9800"
+            border_color="#ff9800",
+            hover=False  # Disable built-in hover to prevent blue fill
         )
         
         # Add hover effects for Rewrite Tag button
@@ -2103,43 +2152,43 @@ class NFCApp(ctk.CTk):
         self.rewrite_btn.bind("<Leave>", on_rewrite_leave)
         self.rewrite_btn.pack(side="left")
 
-        # Exit rewrite button (red X)
-        self.exit_rewrite_btn = ctk.CTkButton(
-            center_frame,
-            text="X",
-            command=self.exit_rewrite_mode,
-            width=50,
+        # Cancel button (hidden initially, shown during countdown)
+        self.cancel_register_btn = ctk.CTkButton(
+            entry_frame,
+            text="Cancel",
+            command=self.cancel_register_operation,
+            width=80,
             height=50,
             corner_radius=8,
-            font=CTkFont(size=14, weight="bold"),
+            font=self.fonts['button'],
             border_width=2,
             fg_color="transparent",
             text_color="#dc3545",
             border_color="#dc3545"
         )
         
-        # Add hover effects for exit rewrite button
-        def on_exit_rewrite_enter(event):
-            self.exit_rewrite_btn.configure(
+        # Add hover effects for cancel button
+        def on_cancel_register_enter(event):
+            self.cancel_register_btn.configure(
                 fg_color="#dc3545",
                 text_color="#212121"
             )
             
-        def on_exit_rewrite_leave(event):
-            self.exit_rewrite_btn.configure(
+        def on_cancel_register_leave(event):
+            self.cancel_register_btn.configure(
                 fg_color="transparent",
                 text_color="#dc3545"
             )
             
-        self.exit_rewrite_btn.bind("<Enter>", on_exit_rewrite_enter)
-        self.exit_rewrite_btn.bind("<Leave>", on_exit_rewrite_leave)
-        self.exit_rewrite_btn.pack(pady=(20, 0))
+        self.cancel_register_btn.bind("<Enter>", on_cancel_register_enter)
+        self.cancel_register_btn.bind("<Leave>", on_cancel_register_leave)
+        # Hide cancel button initially - will be shown during operation
+
 
         # Focus on entry
         self.safe_update_widget('rewrite_id_entry', lambda w: w.focus())
 
-        # Start background tag scanning for rewrite mode
-        self.start_rewrite_tag_scanning()
+        # Register tag mode should NOT have background scanning - only manual registration
 
     def create_checkpoint_content(self):
         """Create checkpoint mode UI."""
@@ -2353,7 +2402,7 @@ class NFCApp(ctk.CTk):
         self.safe_update_widget('guest_name_label', lambda w: w.configure(text=""))
         # Show appropriate status based on mode
         if self.is_rewrite_mode:
-            self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
+            pass  # No status message needed - "Check-in Paused" shown in stations frame
         elif not self.settings_visible:
             self._update_status_with_correct_type()
 
@@ -2417,11 +2466,10 @@ class NFCApp(ctk.CTk):
     def _checkpoint_scan_loop(self):
         """Continuous scanning loop for checkpoint mode."""
         # Background scanning rules:
-        # 1. Always scan in checkpoint mode (non-reception stations)
-        # 2. Only scan at Reception if in checkpoint mode (not registration mode)
-        # 3. Allow scanning during tag info display if in check-in mode
-        # 4. NEVER scan if global NFC operation lock is active
-        # 5. NEVER scan if NFC reader is not connected
+        # 1. Always scan in checkpoint mode (all stations including Reception)
+        # 2. Allow scanning during tag info display if in check-in mode
+        # 3. NEVER scan if global NFC operation lock is active
+        # 4. NEVER scan if NFC reader is not connected
 
         # Check NFC connection first
         if not self._nfc_connected:
@@ -3144,7 +3192,7 @@ class NFCApp(ctk.CTk):
             self.update_mode_content()
             # Return to appropriate status
             if self.is_rewrite_mode:
-                self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
+                pass  # No status message needed - "Check-in Paused" shown in stations frame
             else:
                 self._update_status_with_correct_type()
 
@@ -3565,7 +3613,7 @@ class NFCApp(ctk.CTk):
 
         sheets_btn = ctk.CTkButton(
             button_frame,
-            text="Google Sheets",
+            text="Open Google Sheets",
             command=open_google_sheets,
             width=220,
             height=50,
@@ -3593,6 +3641,7 @@ class NFCApp(ctk.CTk):
         sheets_btn.bind("<Enter>", on_sheets_enter)
         sheets_btn.bind("<Leave>", on_sheets_leave)
         sheets_btn.pack(pady=(20, 10), expand=True)
+
 
         # Clear All Data button
         self.clear_all_btn = ctk.CTkButton(
@@ -3712,7 +3761,7 @@ class NFCApp(ctk.CTk):
         # Warning
         warning_label = ctk.CTkLabel(
             confirm_window,
-            text="🚨 CAUTION 🚨\n\nThis will permanently delete:\n• All local check-in data\n• All Google Sheets check-in data\n\nThis action CANNOT be undone!",
+            text="🚨 CAUTION 🚨\n\nThis will permanently delete:\n• All local check-in data\n• All Google Sheets check-in data\n• All wristband registrations\n\nThis action CANNOT be undone!",
             font=self.fonts['button'],
             text_color="#dc3545",
             justify="center"
@@ -3819,10 +3868,263 @@ class NFCApp(ctk.CTk):
             self.logger.error(f"Error clearing data: {e}")
             self.after(0, self.update_status, f"Error clearing data: {str(e)}", "error")
 
+    def show_bulk_write_mode(self, parent_window):
+        """Show bulk write interface inline in main window."""
+        self.logger.info("Activating bulk write mode...")
+        
+        # Close the advanced dialog first
+        parent_window.destroy()
+        
+        # Close settings mode completely
+        self.settings_visible = False
+        self._cancel_settings_timer()
+        # Clear search field when closing settings
+        self.clear_search()
+        # Reset erase confirmation state when leaving settings
+        self._reset_erase_confirmation()
+        # Clear any stale settings references
+        if hasattr(self, '_came_from_settings'):
+            delattr(self, '_came_from_settings')
+        
+        # Stop all background scanning to prevent NFC conflicts in bulk write mode
+        self.is_scanning = False
+        try:
+            self.nfc_service.cancel_read()
+        except Exception as e:
+            self.logger.debug(f"Error canceling NFC read during bulk write mode start: {e}")
+        
+        # Set bulk write mode flag
+        self.is_bulk_write_mode = True
+        self.logger.info(f"Bulk write mode flag set: {self.is_bulk_write_mode}")
+        
+        # Update UI for bulk write mode
+        self.update_settings_button()
+        self.update_station_buttons_visibility()
+        
+        # Update the main content to show bulk write UI
+        self.logger.info("Calling update_mode_content for bulk write...")
+        self.update_mode_content()
+        
+        self.logger.info("Bulk write mode activation complete")
+
+    def _on_bulk_guest_id_change(self, event=None):
+        """Handle guest ID change in bulk write mode."""
+        if not hasattr(self, 'bulk_id_entry'):
+            return
+            
+        guest_id_text = self.bulk_id_entry.get().strip()
+        
+        if not guest_id_text:
+            self.bulk_guest_name_label.configure(text="")
+            return
+        
+        try:
+            guest_id = int(guest_id_text)
+            
+            # Search through cached guest data
+            for guest in self.guests_data:
+                if guest.original_id == guest_id:
+                    full_name = f"{guest.firstname} {guest.lastname}".strip()
+                    self.bulk_guest_name_label.configure(text=full_name)
+                    return
+            
+            # Guest not found
+            self.bulk_guest_name_label.configure(text="Guest not found")
+            
+        except ValueError:
+            self.bulk_guest_name_label.configure(text="")
+
+    def bulk_write_to_band(self):
+        """Write UUID to wristband in bulk write mode."""
+        if not hasattr(self, 'bulk_id_entry'):
+            return
+        
+        # Check NFC connection first - don't show error if no reader
+        if not self._nfc_connected:
+            return  # Button should be disabled anyway, just silently return
+            
+        guest_id_text = self.bulk_id_entry.get().strip()
+        if not guest_id_text:
+            self.update_status("Please enter a Guest ID", "error")
+            return
+        
+        try:
+            guest_id = int(guest_id_text)
+        except ValueError:
+            self.update_status("Invalid Guest ID format", "error")
+            return
+        
+        # Verify guest exists
+        guest_found = False
+        for guest in self.guests_data:
+            if guest.original_id == guest_id:
+                guest_found = True
+                break
+        
+        if not guest_found:
+            self.update_status("Guest not found", "error")
+            return
+        
+        # Start timeout countdown and operation
+        self._bulk_write_operation_active = True
+        self._disable_bulk_write_ui()
+        self._show_cancel_button()
+        self._countdown_bulk_write(10)
+        
+        # Start bulk write operation in background
+        self.submit_background_task(self._bulk_write_thread, guest_id)
+
+    def _countdown_bulk_write(self, countdown: int):
+        """Show countdown for bulk write operation."""
+        if countdown > 0 and self._bulk_write_operation_active:
+            self.update_status(f"Place wristband on reader... {countdown}s", "warning", False)
+            self.after(1000, lambda: self._countdown_bulk_write(countdown - 1))
+        elif self._bulk_write_operation_active:
+            # Timeout reached
+            self._bulk_write_operation_active = False
+            self.update_status("No tag detected. Try again.", "error")
+            self._enable_bulk_write_ui()
+            self._hide_cancel_button()
+
+    def _disable_bulk_write_ui(self):
+        """Disable bulk write UI elements during operation."""
+        self.safe_update_widget('bulk_write_btn', lambda w: w.configure(state="disabled"))
+        self.safe_update_widget('bulk_id_entry', lambda w: w.configure(state="disabled"))
+
+    def _enable_bulk_write_ui(self):
+        """Re-enable bulk write UI elements."""
+        self._bulk_write_operation_active = False
+        self.safe_update_widget('bulk_id_entry', lambda w: w.configure(state="normal"))
+        # Update button state based on NFC connection
+        self.update_bulk_write_button_state()
+
+    def _show_cancel_button(self):
+        """Show the cancel button during bulk write operation."""
+        if hasattr(self, 'cancel_bulk_write_btn'):
+            self.cancel_bulk_write_btn.pack(side="left", padx=(10, 0))
+
+    def _hide_cancel_button(self):
+        """Hide the cancel button after bulk write operation."""
+        if hasattr(self, 'cancel_bulk_write_btn'):
+            self.cancel_bulk_write_btn.pack_forget()
+
+    def cancel_bulk_write_operation(self):
+        """Cancel the bulk write operation."""
+        if self._bulk_write_operation_active:
+            self._bulk_write_operation_active = False
+            self.update_status("Bulk write cancelled", "info")
+            self._enable_bulk_write_ui()
+            self._hide_cancel_button()
+
+    def _bulk_write_thread(self, guest_id):
+        """Background thread for bulk write operation."""
+        try:
+            # Check if operation was cancelled
+            if not self._bulk_write_operation_active:
+                return
+                
+            # Read NFC tag to get UUID
+            tag = self.nfc_service.read_tag(timeout=10)
+            
+            # Stop countdown when thread completes (success or failure)
+            self.after(0, self._enable_bulk_write_ui)
+            self.after(0, self._hide_cancel_button)
+            
+            if not tag:
+                self.after(0, lambda: self.update_status("No tag detected. Try again.", "error"))
+                return
+            
+            tag_uuid = tag.uid
+            if not tag_uuid:
+                self.after(0, lambda: self.update_status("Could not read tag UUID", "error"))
+                return
+            
+            # Register tag using the same mechanism as normal registration
+            self.logger.info(f"Registering tag {tag_uuid} to guest {guest_id} using bulk write mode")
+            result = self.tag_manager.register_tag_to_guest_with_existing_tag(guest_id, tag)
+            
+            if result:
+                # Also write UUID to Google Sheets column E (bulk write specific feature)
+                self.logger.info(f"Writing UUID {tag_uuid} to Google Sheets column E for guest {guest_id}")
+                sheets_success = self.sheets_service.write_wristband_uuid(guest_id, tag_uuid)
+                
+                if sheets_success:
+                    self.logger.info(f"Successfully registered tag {tag_uuid} to guest {guest_id} and wrote to column E")
+                    self.after(0, lambda: self.update_status("Tag registered", "success"))
+                else:
+                    self.logger.warning(f"Tag registered locally but failed to write UUID to Google Sheets column E for guest {guest_id}")
+                    self.after(0, lambda: self.update_status("Tag registered (local only)", "warning"))
+                    
+                # Clear the entry after successful write
+                self.after(2000, lambda: self.bulk_id_entry.delete(0, 'end') if hasattr(self, 'bulk_id_entry') else None)
+                self.after(2000, lambda: self.bulk_guest_name_label.configure(text="") if hasattr(self, 'bulk_guest_name_label') else None)
+            else:
+                self.after(0, lambda: self.update_status("Failed to register tag", "error"))
+        
+        except Exception as e:
+            self.logger.error(f"Bulk write error: {e}")
+            # Stop countdown on error
+            self.after(0, self._enable_bulk_write_ui)
+            self.after(0, self._hide_cancel_button)
+            
+            # Provide more specific error messages
+            error_msg = str(e)
+            if "timeout" in error_msg.lower():
+                display_msg = "Tag read timeout - try again"
+            elif "connection" in error_msg.lower():
+                display_msg = "NFC connection error - check reader"
+            elif "sheets" in error_msg.lower() or "api" in error_msg.lower():
+                display_msg = "Google Sheets error - check connection"
+            else:
+                display_msg = f"Bulk write error: {error_msg}"
+            
+            self.after(0, lambda: self.update_status(display_msg, "error"))
+
+    def close_bulk_write_mode(self):
+        """Close bulk write mode and return to main station."""
+        self.is_bulk_write_mode = False
+        
+        # Update UI to show station buttons and normal hamburger menu
+        self.update_settings_button()
+        self.update_station_buttons_visibility()
+        
+        # Update content to show normal station view
+        self.update_mode_content()
+        
+        # Return to checkpoint scanning if NFC is connected
+        if self._nfc_connected and not self.is_scanning:
+            self.start_checkpoint_scanning()
+
+    def update_station_buttons_visibility(self):
+        """Update station buttons visibility based on current mode."""
+        if self.is_rewrite_mode:
+            # Hide station buttons and show "Check ins paused" text
+            if hasattr(self, 'station_buttons_container'):
+                self.station_buttons_container.pack_forget()
+            
+            # Create or update register mode label
+            if not hasattr(self, 'register_mode_label'):
+                # Find the station frame to add the label
+                station_frame = self.station_buttons_container.master
+                self.register_mode_label = ctk.CTkLabel(
+                    station_frame,
+                    text="Check-in Paused",
+                    font=CTkFont(size=18, weight="bold"),
+                    text_color="#ff9800"
+                )
+            self.register_mode_label.pack(side="left")
+        else:
+            # Show station buttons and hide register mode label
+            if hasattr(self, 'station_buttons_container'):
+                self.station_buttons_container.pack(side="left")
+            
+            if hasattr(self, 'register_mode_label'):
+                self.register_mode_label.pack_forget()
+
     def rewrite_tag(self):
-        """Enter rewrite tag mode."""
+        """Enter register tag mode."""
         self._restart_settings_timer()  # Restart timer on button interaction
-        self.logger.info("User clicked Rewrite Tag button")
+        self.logger.info("User clicked Register Tag button")
         # Check NFC connection first
         if not self._nfc_connected:
             self.update_status(self.STATUS_NFC_NOT_CONNECTED, "error")
@@ -3837,9 +4139,20 @@ class NFCApp(ctk.CTk):
         self.clear_search()
         self.is_rewrite_mode = True
         self.is_registration_mode = False  # Ensure registration mode is off
+        self.is_checkpoint_mode = False   # Disable checkpoint mode to prevent background scanning
         self.update_settings_button()
+        self.update_station_buttons_visibility()
+        
         self.update_mode_content()
-        self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
+        
+        # Update table structure for registration mode (same as station toggle)
+        self._update_table_structure()
+        
+        # Refresh table data
+        if hasattr(self, 'guests_data') and self.guests_data:
+            self._update_guest_table_silent(self.guests_data)
+        # Keep status bar clear in rewrite mode - "Check-in Paused" shown in stations frame
+        self.update_status("", "normal")
 
 
     def on_station_button_click(self, station: str):
@@ -3896,10 +4209,10 @@ class NFCApp(ctk.CTk):
         old_station = self.current_station
         self.current_station = station
         self.logger.info(f"Switched from {old_station} to {station}")
-        self.is_registration_mode = (station == "Reception")
+        self.is_registration_mode = False  # Reception is now checkpoint-only
         
-        # Set checkpoint mode: Reception has it active, others don't
-        self.is_checkpoint_mode = (station == "Reception")
+        # Set checkpoint mode: all stations including Reception are checkpoint stations
+        self.is_checkpoint_mode = True
 
         # Update station toggle label text if in single station mode
         if not self.show_all_stations:
@@ -4041,6 +4354,7 @@ class NFCApp(ctk.CTk):
         self.logger.warning("Guest table recreation disabled - restart app to see new columns")
         return
     
+    
     def _delayed_station_refresh(self):
         """Force refresh of dynamic stations after UI initialization."""
         try:
@@ -4145,38 +4459,102 @@ class NFCApp(ctk.CTk):
                 # No search active, show all guests
                 self._update_guest_table_silent(self.guests_data)
 
+    def _force_treeview_update(self):
+        """Force TreeView to update its display after column changes."""
+        if self.is_rewrite_mode:
+            # Force all parent containers to update their geometry
+            self.update_idletasks()
+            
+            # Don't set explicit TreeView width - let it naturally expand to fill container
+            # Match the exact configuration used in single station mode
+            for tree in [self.guest_tree, self.summary_tree]:
+                tree.column("id", width=80, minwidth=60, anchor="w")
+                tree.column("first", width=150, minwidth=100, anchor="w")
+                tree.column("last", width=150, minwidth=100, anchor="w")
+                tree.column("wristband", width=200, minwidth=150, anchor="center")
+            
+            # Force geometry update
+            self.guest_tree.update_idletasks()
+            self.summary_tree.update_idletasks()
+
     def _update_table_structure(self):
-        """Update table columns and headers based on current station view."""
-        available_stations = self._get_filtered_stations_for_view()
-        
-        # Update column configuration for both trees
-        columns = ("id", "first", "last") + tuple(station.lower() for station in available_stations)
-        
-        for tree in [self.summary_tree, self.guest_tree]:
-            # Configure the tree with new columns
-            tree.configure(columns=columns)
+        """Update table columns and headers based on current station view or registration mode."""
+        if self.is_rewrite_mode:
+            # Registration mode: show wristband columns
+            columns = ("id", "first", "last", "wristband")
             
-            # Configure fixed column headers and widths
-            tree.heading("id", text="Guest ID", anchor="w")
-            tree.heading("first", text="First Name", anchor="w")
-            tree.heading("last", text="Last Name", anchor="w")
-            
-            tree.column("id", width=80, minwidth=60, anchor="w")
-            tree.column("first", width=150, minwidth=100, anchor="w")
-            tree.column("last", width=150, minwidth=100, anchor="w")
-            
-            # Configure station columns with responsive sizing
-            for station in available_stations:
-                station_key = station.lower()
+            for tree in [self.summary_tree, self.guest_tree]:
+                # Configure the tree with registration columns
+                tree.configure(columns=columns)
                 
-                # In single station mode, don't show station name (it's in toggle button above)
-                # In all stations mode, show all station names in headers
-                if len(available_stations) == 1:
-                    tree.heading(station_key, text="", anchor="center")
-                    tree.column(station_key, width=200, minwidth=150, anchor="center")
-                else:
-                    tree.heading(station_key, text=station, anchor="center")
-                    tree.column(station_key, width=120, minwidth=80, anchor="center")
+                # Force column deletion and recreation to ensure clean state
+                tree.delete(*tree.get_children())
+                
+                # IMPORTANT: Hide all old station columns that might be lingering
+                # This ensures the TreeView recalculates its width properly
+                all_possible_columns = ["id", "first", "last", "wristband", "reception", "lio", "juntos", "experimental", "unvrs"]
+                for col in all_possible_columns:
+                    try:
+                        if col not in columns:
+                            tree.column(col, width=0, minwidth=0, stretch=False)
+                    except:
+                        pass  # Column might not exist
+                
+                # Configure column headers and widths
+                tree.heading("id", text="Guest ID", anchor="w")
+                tree.heading("first", text="First Name", anchor="w")
+                tree.heading("last", text="Last Name", anchor="w")
+                tree.heading("wristband", text="Wristband", anchor="center")
+                
+                # Copy exact pattern from single station mode
+                tree.column("id", width=80, minwidth=60, anchor="w")
+                tree.column("first", width=150, minwidth=100, anchor="w")
+                tree.column("last", width=150, minwidth=100, anchor="w")
+                tree.column("wristband", width=200, minwidth=150, anchor="center")
+            
+            # Show summary tree in registration mode with wristband stats
+            self.summary_tree.pack(fill="x", pady=(0, 1))
+            
+            # Force TreeView to recalculate its display width
+            self.after(1, lambda: self._force_treeview_update())
+            
+        else:
+            # Normal station view mode
+            available_stations = self._get_filtered_stations_for_view()
+            
+            # Update column configuration for both trees
+            columns = ("id", "first", "last") + tuple(station.lower() for station in available_stations)
+            
+            for tree in [self.summary_tree, self.guest_tree]:
+                # Configure the tree with new columns
+                tree.configure(columns=columns)
+                
+                # Configure fixed column headers and widths
+                tree.heading("id", text="Guest ID", anchor="w")
+                tree.heading("first", text="First Name", anchor="w")
+                tree.heading("last", text="Last Name", anchor="w")
+                
+                tree.column("id", width=80, minwidth=60, anchor="w")
+                tree.column("first", width=150, minwidth=100, anchor="w")
+                tree.column("last", width=150, minwidth=100, anchor="w")
+                
+                # Configure station columns with responsive sizing
+                for i, station in enumerate(available_stations):
+                    station_key = station.lower()
+                    # Only stretch the last column
+                    is_last = (i == len(available_stations) - 1)
+                    
+                    # In single station mode, don't show station name (it's in toggle button above)
+                    # In all stations mode, show all station names in headers
+                    if len(available_stations) == 1:
+                        tree.heading(station_key, text="", anchor="center")
+                        tree.column(station_key, width=200, minwidth=150, anchor="center")
+                    else:
+                        tree.heading(station_key, text=station, anchor="center")
+                        tree.column(station_key, width=120, minwidth=80, anchor="center")
+            
+            # Show summary tree in normal mode
+            self.summary_tree.pack(fill="x", pady=(0, 1))
 
     def _get_filtered_stations_for_view(self, fast_fail_startup=False):
         """Get stations list based on current view mode (all stations vs current station only)."""
@@ -4394,12 +4772,17 @@ class NFCApp(ctk.CTk):
         self._check_and_refresh_stations()
 
     def _add_summary_row(self, guests, available_stations, local_check_ins):
-        """Add a summary row showing checked-in counts per station."""
+        """Add a summary row showing checked-in counts per station or wristband stats."""
         # Build summary values: show total guests in first column, other columns empty
         total_guests = len(guests)
         
+        # Registration mode - show wristband stats
+        if self.is_rewrite_mode:
+            # Count guests with wristbands
+            wristband_count = sum(1 for guest in guests if guest.wristband_uuid)
+            summary_values = [f"{wristband_count}/{total_guests}", "", "", ""]
         # In single station mode, also show unchecked count
-        if not self.show_all_stations and len(available_stations) == 1:
+        elif not self.show_all_stations and len(available_stations) == 1:
             # Calculate unchecked count for the single station
             station_key = available_stations[0].lower()
             checked_count = 0
@@ -4883,6 +5266,8 @@ class NFCApp(ctk.CTk):
                 
             # Resolve any sync conflicts (local data vs Google Sheets)
             self.tag_manager.resolve_sync_conflicts(guests)
+            # Sync tag registry with wristband data from Google Sheets
+            self.tag_manager.sync_tag_registry_with_sheets(guests)
             # Always update table even if empty to show local data
             self.after(0, self._update_guest_table, guests)
         except Exception as e:
@@ -4891,9 +5276,11 @@ class NFCApp(ctk.CTk):
             try:
                 cached_guests = getattr(self.sheets_service, '_cached_guests', [])
                 self.logger.info(f"Using fallback cached data: {len(cached_guests)} guests")
+                self.tag_manager.sync_tag_registry_with_sheets(cached_guests)
                 self.after(0, self._update_guest_table, cached_guests)
             except:
                 # Final fallback to existing app data
+                self.tag_manager.sync_tag_registry_with_sheets(self.guests_data)
                 self.after(0, self._update_guest_table, self.guests_data)
             # Only show cached data message for user-initiated refreshes, not automatic ones
             if hasattr(self, '_is_user_initiated_refresh') and self._is_user_initiated_refresh:
@@ -4926,7 +5313,7 @@ class NFCApp(ctk.CTk):
         except:
             available_stations = self.config['stations']
 
-        # Add summary row showing checked-in counts per station
+        # Add summary row showing checked-in counts per station or wristband stats
         self._add_summary_row(guests, available_stations, local_check_ins)
 
         # Track discrepancies for re-sync
@@ -4940,45 +5327,53 @@ class NFCApp(ctk.CTk):
                 guest.lastname
             ]
 
-            # Get dynamic stations
-            # Use cached stations for table population
-            try:
-                available_stations = self._get_filtered_stations_for_view()
-            except:
-                available_stations = self.config['stations']
-            
-            # Add check-in status for each station
-            for station in available_stations:
-                station_key = station.lower()
-                
-                # Ensure the guest has this station in their check_ins dict
-                if station_key not in guest.check_ins:
-                    guest.check_ins[station_key] = None
-                
-                # Google Sheets data takes priority (for manual edits compatibility)
-                sheets_time = guest.get_check_in_time(station_key)
-                local_time = local_check_ins.get(guest.original_id, {}).get(station_key)
-
-                if sheets_time:
-                    # Google Sheets has data - use it (no hourglass needed)
-                    values.append(f"✓ {sheets_time}")
-                elif local_time:
-                    if sync_complete:
-                        # If sync shows complete but Google Sheets is missing data, re-sync this item
-                        discrepancies.append({
-                            'guest_id': guest.original_id,
-                            'station': station.lower(),
-                            'timestamp': local_time
-                        })
-                        # Show without hourglass since sync claims to be complete
-                        values.append(f"✓ {local_time}")
-                    else:
-                        # Sync still pending - show hourglass
-                        values.append(f"✓ {local_time} ⏳")  # Clock emoji indicates pending
-                elif self.checkin_buttons_visible:
-                    values.append("Check-in")
+            if self.is_rewrite_mode:
+                # Registration mode: add wristband column
+                # Check if guest has wristband UUID in column E
+                if guest.wristband_uuid:
+                    values.append("✓")  # Checkmark for registered wristband
                 else:
-                    values.append("-")
+                    values.append("-")  # No wristband registered
+            else:
+                # Get dynamic stations
+                # Use cached stations for table population
+                try:
+                    available_stations = self._get_filtered_stations_for_view()
+                except:
+                    available_stations = self.config['stations']
+                
+                # Add check-in status for each station
+                for station in available_stations:
+                    station_key = station.lower()
+                
+                    # Ensure the guest has this station in their check_ins dict
+                    if station_key not in guest.check_ins:
+                        guest.check_ins[station_key] = None
+                    
+                    # Google Sheets data takes priority (for manual edits compatibility)
+                    sheets_time = guest.get_check_in_time(station_key)
+                    local_time = local_check_ins.get(guest.original_id, {}).get(station_key)
+
+                    if sheets_time:
+                        # Google Sheets has data - use it (no hourglass needed)
+                        values.append(f"✓ {sheets_time}")
+                    elif local_time:
+                        if sync_complete:
+                            # If sync shows complete but Google Sheets is missing data, re-sync this item
+                            discrepancies.append({
+                                'guest_id': guest.original_id,
+                                'station': station.lower(),
+                                'timestamp': local_time
+                            })
+                            # Show without hourglass since sync claims to be complete
+                            values.append(f"✓ {local_time}")
+                        else:
+                            # Sync still pending - show hourglass
+                            values.append(f"✓ {local_time} ⏳")  # Clock emoji indicates pending
+                    elif self.checkin_buttons_visible:
+                        values.append("Check-in")
+                    else:
+                        values.append("-")
 
             # Determine row styling
             tags = []
@@ -4990,9 +5385,14 @@ class NFCApp(ctk.CTk):
             else:
                 tags.append("odd")
             
-            # Check if guest is fully checked in at all stations
-            if self._is_guest_fully_checked_in(guest, available_stations):
-                tags = ["complete"]  # Override alternate colors with green
+            if self.is_rewrite_mode:
+                # Registration mode: highlight guests with registered wristbands
+                if guest.wristband_uuid:
+                    tags = ["complete"]  # Use green highlighting for registered wristbands
+            else:
+                # Check if guest is fully checked in at all stations
+                if self._is_guest_fully_checked_in(guest, available_stations):
+                    tags = ["complete"]  # Override alternate colors with green
             
             item = self.guest_tree.insert("", "end", values=values, tags=tags)
 
@@ -5034,7 +5434,7 @@ class NFCApp(ctk.CTk):
             self.update_status(f"Loaded {len(guests)} guests", "success")
             # Fade to appropriate status after 2 seconds
             if self.is_rewrite_mode:
-                self.after(2000, lambda: self.update_status(self.STATUS_CHECKIN_PAUSED, "warning"))
+                self.after(2000, lambda: self.update_status("", "normal"))
             else:
                 self.after(2000, lambda: self._update_status_respecting_settings_mode_with_correct_type())
             self._initial_load_complete = True
@@ -5050,7 +5450,8 @@ class NFCApp(ctk.CTk):
             delattr(self, '_is_user_initiated_refresh')  # Clean up flag
         elif self.is_rewrite_mode:
             # In rewrite mode, go straight to paused status
-            self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
+            # No status message needed - "Check-in Paused" shown in stations frame
+            pass
         # No refresh messages for silent background refreshes
 
     def _handle_sync_discrepancies(self, discrepancies: List[Dict]):
@@ -5435,7 +5836,7 @@ class NFCApp(ctk.CTk):
         self._cancel_settings_timer()
         # Clear search field when closing settings
         self.clear_search()
-        self.is_registration_mode = (self.current_station == "Reception")
+        self.is_registration_mode = False  # All stations are checkpoint-only
         self.update_settings_button()
         self.update_mode_content()
 
@@ -5487,7 +5888,7 @@ class NFCApp(ctk.CTk):
         # Disable UI during tag check
         self.safe_update_widget('rewrite_btn', lambda w: w.configure(state="disabled"))
         self.safe_update_widget('rewrite_id_entry', lambda w: w.configure(state="disabled"))
-        self.safe_update_widget('exit_rewrite_btn', lambda w: w.configure(state="disabled"))
+        # Exit button handled by red X settings button - no separate exit button needed
 
         # Cancel any ongoing NFC operations to prevent conflicts
         try:
@@ -5505,17 +5906,22 @@ class NFCApp(ctk.CTk):
         thread.start()
 
     def _countdown_rewrite_check(self, countdown: int):
-        """Show countdown for rewrite check operation."""
+        """Show countdown for register operation."""
         if countdown > 0 and self._rewrite_check_operation_active:
-            self.update_status(f"Waiting for tag to rewrite... {countdown}s", "info", False)
-            self.after(1000, lambda: self._countdown_rewrite_check(countdown - 1))
+            self.update_status(f"Place tag on reader... {countdown}s", "warning", False)
+            # Show cancel button during countdown
+            self._show_cancel_register_button()
+            # Store timer ID so it can be cancelled
+            self._rewrite_countdown_timer = self.after(1000, lambda: self._countdown_rewrite_check(countdown - 1))
         elif self._rewrite_check_operation_active:
             # Timeout reached
             self._rewrite_check_operation_active = False
+            self._rewrite_countdown_timer = None
             # Release global NFC lock on timeout
             self._nfc_operation_lock = False
-            self.update_status(self.STATUS_NO_TAG_DETECTED, "error")
+            self.update_status("No tag detected. Try again.", "error")
             self._enable_rewrite_ui()
+            self._hide_cancel_register_button()
 
     def _check_tag_registration_thread(self, guest_id: int):
         """Thread to check if tag is already registered."""
@@ -5523,20 +5929,23 @@ class NFCApp(ctk.CTk):
             # Read tag to check registration
             tag = self.nfc_service.read_tag(timeout=5)
 
-            # Always stop countdown when thread completes
-            self._rewrite_check_operation_active = False
-
             if not tag:
-                # Check what type of error occurred for better user feedback
-                error_type = self.nfc_service.get_last_error_type()
-                self.after(0, self._enable_rewrite_ui)
-                if error_type == 'timeout':
-                    self.after(0, self.update_status, "No tag detected", "error")
-                elif error_type in ('connection_failed', 'read_failed'):
-                    self.after(0, self.update_status, "Failed to read tag - try again", "error")
+                # Only show error message if operation is still active (not cancelled)
+                if self._rewrite_check_operation_active:
+                    # Check what type of error occurred for better user feedback
+                    error_type = self.nfc_service.get_last_error_type()
+                    self.after(0, self._enable_rewrite_ui)
+                    if error_type == 'timeout':
+                        self.after(0, self.update_status, "No tag detected", "error")
+                    elif error_type in ('connection_failed', 'read_failed'):
+                        self.after(0, self.update_status, "Failed to read tag - try again", "error")
+                    else:
+                        self.after(0, self.update_status, "No tag detected", "error")
                 else:
-                    self.after(0, self.update_status, "No tag detected", "error")
-                # Release operation lock on failure
+                    # Operation was cancelled - just clean up UI without showing error
+                    self.after(0, self._enable_rewrite_ui)
+                # Stop countdown and release operation lock on failure/cancellation
+                self._rewrite_check_operation_active = False
                 self.after(0, self._release_rewrite_lock)
                 return
 
@@ -5551,6 +5960,8 @@ class NFCApp(ctk.CTk):
                     # Same guest - just show message
                     current_guest = self.sheets_service.find_guest_by_id(current_guest_id)
                     guest_name = current_guest.full_name if current_guest else f"Guest ID {current_guest_id}"
+                    # Operation complete - stop countdown
+                    self._rewrite_check_operation_active = False
                     self.after(0, self._enable_rewrite_ui)
                     self.after(0, self.update_status, f"Tag already registered to {guest_name}", "warning")
                     self.after(0, self._release_rewrite_lock)
@@ -5563,11 +5974,15 @@ class NFCApp(ctk.CTk):
                 current_name = current_guest.full_name if current_guest else f"Guest ID {current_guest_id}"
                 new_name = new_guest.full_name if new_guest else f"Guest ID {guest_id}"
 
+                # Operation proceeding to confirmation - stop countdown
+                self._rewrite_check_operation_active = False
                 # Show confirmation dialog
                 self.after(0, self._show_rewrite_confirmation, current_name, new_name, guest_id, tag)
             else:
                 # Tag is clean - proceed with direct write
                 self.logger.info(f"Tag {tag.uid} is not registered - proceeding with direct write")
+                # Operation proceeding to rewrite - stop countdown
+                self._rewrite_check_operation_active = False
                 self.after(0, self._proceed_with_direct_rewrite, guest_id, tag)
 
         except Exception as e:
@@ -5647,7 +6062,7 @@ class NFCApp(ctk.CTk):
             self.update_status("Rewriting tag...", "info")
             self.rewrite_btn.configure(state="disabled")
             self.rewrite_id_entry.configure(state="disabled")
-            self.exit_rewrite_btn.configure(state="disabled")
+            # Exit button handled by red X settings button - no separate exit button needed
 
             # Execute rewrite in background thread
             thread = threading.Thread(target=self._execute_rewrite_thread, args=(guest_id, tag))
@@ -5750,12 +6165,12 @@ class NFCApp(ctk.CTk):
                 existing_name = existing_guest.full_name if existing_guest else f"ID {existing_id}"
                 self.logger.info(f"Overwriting tag {tag.uid} from {existing_name} to {guest.full_name}")
 
-            # Register the tag
+            # Register the tag locally first
             tag.register_to_guest(guest_id, guest.full_name)
             self.tag_manager.tag_registry[tag.uid] = guest_id
             self.tag_manager.save_registry()
 
-            # Create result dict for UI update
+            # Create result dict for immediate UI update
             result = {
                 'tag_uid': tag.uid,
                 'original_id': guest_id,
@@ -5764,40 +6179,162 @@ class NFCApp(ctk.CTk):
                 'action': 'rewrite'
             }
 
+            # Update local data immediately for instant feedback
+            self.after(0, lambda: self._update_local_guest_wristband_and_complete(guest_id, tag.uid, result))
+
+            # Background Google Sheets write (non-blocking)
+            self.submit_background_task(self._background_wristband_write, guest_id, tag.uid)
+
             self.logger.info(f"Rewrite successful: {result}")
-            self.after(0, self._rewrite_complete, result)
 
         except Exception as e:
             self.logger.error(f"Rewrite operation error: {e}", exc_info=True)
             self.after(0, self._rewrite_complete, None)
 
+    def _background_wristband_write(self, guest_id: int, tag_uid: str):
+        """Background task to write wristband UUID to Google Sheets."""
+        try:
+            success = self.sheets_service.write_wristband_uuid(guest_id, tag_uid)
+            if success:
+                self.logger.info(f"Background sync: Successfully wrote wristband UUID {tag_uid} to Google Sheets for guest {guest_id}")
+            else:
+                self.logger.warning(f"Background sync: Failed to write wristband UUID to Google Sheets for guest {guest_id}")
+        except Exception as sheets_error:
+            self.logger.error(f"Background sync: Error writing wristband UUID to Google Sheets: {sheets_error}")
+
     def _rewrite_complete(self, result: Optional[Dict]):
         """Handle rewrite completion."""
+        # Cancel any countdown timer
+        if self._rewrite_countdown_timer:
+            self.after_cancel(self._rewrite_countdown_timer)
+            self._rewrite_countdown_timer = None
+        self._rewrite_check_operation_active = False
+        self._hide_cancel_register_button()
+        
         self._enable_rewrite_ui()
 
         if result:
-            self.update_status(f"✓ Tag rewritten to {result['guest_name']}", "success")
+            self.update_status(f"✓ Tag registered to {result['guest_name']}", "success")
+            
+            # Local data and UI are updated immediately by _execute_rewrite_thread
+            # No need for delayed refresh since background sync handles Google Sheets
+            
             self.after(2000, self.clear_rewrite_form)
-            self.after(2500, lambda: self.refresh_guest_data(False))
         else:
-            if self.status_label.cget("text") == "Rewriting tag...":
-                self.update_status("Failed to rewrite tag", "error")
+            if self.status_label.cget("text") == "Registering tag...":
+                self.update_status("Failed to register tag", "error")
 
         self.rewrite_id_entry.focus()
 
+    def _update_local_guest_wristband(self, guest_id: int, wristband_uuid: str):
+        """Update local guest data to reflect wristband registration."""
+        try:
+            # Find the guest in local data and update wristband_uuid
+            for guest in self.guests_data:
+                if guest.original_id == guest_id:
+                    guest.wristband_uuid = wristband_uuid
+                    self.logger.debug(f"Updated local guest data: Guest {guest_id} now has wristband {wristband_uuid}")
+                    break
+            
+            # Immediately refresh the table to show the checkmark and green highlighting
+            if hasattr(self, 'guests_data') and self.guests_data:
+                self._update_guest_table_silent(self.guests_data)
+                
+        except Exception as e:
+            self.logger.error(f"Error updating local guest wristband data: {e}")
+
+    def _update_local_guest_wristband_and_complete(self, guest_id: int, wristband_uuid: str, result: dict):
+        """Update local wristband data then complete the rewrite operation."""
+        try:
+            # First update the local data
+            self._update_local_guest_wristband(guest_id, wristband_uuid)
+            # Then complete the rewrite operation
+            self._rewrite_complete(result)
+        except Exception as e:
+            self.logger.error(f"Error in wristband update and complete: {e}")
+            self._rewrite_complete(None)
+
     def clear_rewrite_form(self):
-        """Clear the rewrite form."""
+        """Clear the register form."""
         self.safe_update_widget('rewrite_id_entry', lambda w: w.delete(0, 'end'))
-        self.update_status(self.STATUS_CHECKIN_PAUSED, "warning")
+        # Keep status bar clear in rewrite mode - "Check-in Paused" shown in stations frame
+        self.update_status("", "normal")
+
+    def close_register_mode(self):
+        """Close register mode and return to main station."""
+        self.is_rewrite_mode = False
+        self.is_checkpoint_mode = True   # Re-enable checkpoint mode for background scanning
+        
+        # Update UI to show station buttons and normal hamburger menu
+        self.update_settings_button()
+        self.update_station_buttons_visibility()
+        
+        # Update content to show normal station view
+        self.update_mode_content()
+        
+        # Restore table structure for normal mode (same as station toggle)
+        self._update_table_structure()
+        
+        # Refresh table data
+        if hasattr(self, 'guests_data') and self.guests_data:
+            self._update_guest_table_silent(self.guests_data)
+        
+        # Return to checkpoint scanning if NFC is connected
+        if self._nfc_connected and not self.is_scanning:
+            self.start_checkpoint_scanning()
+
+    def cancel_register_operation(self):
+        """Cancel the register operation countdown."""
+        if self._rewrite_check_operation_active:
+            # Cancel the countdown timer
+            if self._rewrite_countdown_timer:
+                self.after_cancel(self._rewrite_countdown_timer)
+                self._rewrite_countdown_timer = None
+            
+            # Stop the operation
+            self._rewrite_check_operation_active = False
+            
+            # Release any locks
+            if self._nfc_operation_lock:
+                self._nfc_operation_lock = False
+                
+            # Cancel any ongoing NFC operation
+            try:
+                self.nfc_service.cancel_read()
+            except Exception as e:
+                self.logger.debug(f"Error canceling NFC read during registration cancel: {e}")
+            
+            # Update UI - show brief cancellation message then clear
+            self.update_status("Registration cancelled", "info")
+            # Clear status after 2 seconds to keep status bar clean in rewrite mode
+            self.after(2000, lambda: self.update_status("", "normal"))
+            self._enable_rewrite_ui()
+            self._hide_cancel_register_button()
+
+    def _show_cancel_register_button(self):
+        """Show the cancel button during register operation countdown."""
+        if hasattr(self, 'cancel_register_btn'):
+            self.cancel_register_btn.pack(side="left", padx=(10, 0))
+
+    def _hide_cancel_register_button(self):
+        """Hide the cancel button after register operation."""
+        if hasattr(self, 'cancel_register_btn'):
+            self.cancel_register_btn.pack_forget()
 
     def _enable_rewrite_ui(self):
-        """Re-enable rewrite UI elements."""
-        # Reset countdown operation flag
+        """Re-enable register UI elements."""
+        # Reset countdown operation flag and clear timer
         self._rewrite_check_operation_active = False
+        if self._rewrite_countdown_timer:
+            self.after_cancel(self._rewrite_countdown_timer)
+            self._rewrite_countdown_timer = None
 
         self.safe_update_widget('rewrite_btn', lambda w: w.configure(state="normal"))
         self.safe_update_widget('rewrite_id_entry', lambda w: w.configure(state="normal"))
-        self.safe_update_widget('exit_rewrite_btn', lambda w: w.configure(state="normal"))
+        self._hide_cancel_register_button()
+        
+        # Release the rewrite operation lock
+        self._release_rewrite_lock()
             
     def _release_rewrite_lock(self):
         """Release the rewrite operation lock."""
@@ -6304,7 +6841,8 @@ class NFCApp(ctk.CTk):
                 # Always show NFC disconnected message when not connected
                 self.update_status(self.STATUS_NFC_NOT_CONNECTED, "error", False)
             elif self.is_rewrite_mode:
-                self.update_status(self.STATUS_CHECKIN_PAUSED, "warning", False)
+                # Clear message in rewrite mode - "Check-in Paused" shown in stations frame only
+                self.update_status("", "normal", False)
             elif self.settings_visible:
                 # Clear message in settings mode
                 self.update_status("", "normal", False)
@@ -6419,7 +6957,7 @@ class NFCApp(ctk.CTk):
         if hasattr(self, 'operation_in_progress') and self.operation_in_progress:
             return "break"
         
-        # 4. Rewrite mode - return to Reception registration
+        # 4. Rewrite mode - return to Reception checkpoint
         if hasattr(self, 'is_rewrite_mode') and self.is_rewrite_mode:
             self.exit_rewrite_mode()
             return "break"

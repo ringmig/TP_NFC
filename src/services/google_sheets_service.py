@@ -9,12 +9,9 @@ from typing import List, Dict, Optional, Any
 from pathlib import Path
 import json
 
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
+from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-import pickle
 import time
 import ssl
 import socket
@@ -102,57 +99,32 @@ class GoogleSheetsService:
 
     def authenticate(self) -> bool:
         """
-        Authenticate with Google Sheets API.
+        Authenticate with Google Sheets API using Service Account.
         
         Returns:
             bool: True if authenticated successfully
         """
         try:
-            token_file = Path(self.config['token_file'])
-            creds_file = Path(self.config['credentials_file'])
+            service_account_file = self.config.get('service_account_file')
+            if not service_account_file:
+                self.logger.error("No service_account_file specified in config")
+                return False
+                
+            service_account_path = Path(service_account_file)
+            if not service_account_path.exists():
+                self.logger.error(f"Service account file not found: {service_account_path}")
+                return False
+                
+            # Load Service Account credentials
+            self.creds = Credentials.from_service_account_file(
+                str(service_account_path),
+                scopes=self.config['scopes']
+            )
             
-            # Load existing token
-            if token_file.exists():
-                with open(token_file, 'rb') as token:
-                    self.creds = pickle.load(token)
-                    
-            # If there are no (valid) credentials available, let the user log in
-            if not self.creds or not self.creds.valid:
-                if self.creds and self.creds.expired and self.creds.refresh_token:
-                    self.creds.refresh(Request())
-                else:
-                    if not creds_file.exists():
-                        self.logger.error(f"Credentials file not found: {creds_file}")
-                        self.logger.error("Please download credentials.json from Google Cloud Console")
-                        return False
-                        
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        str(creds_file), self.config['scopes'])
-                    self.creds = flow.run_local_server(port=0)
-                    
-                # Save the credentials for the next run
-                with open(token_file, 'wb') as token:
-                    pickle.dump(self.creds, token)
-                    
-            # Build the service with threading-safe configuration
-            # This addresses WRONG_VERSION_NUMBER errors in threaded environments
-            # by ensuring each service instance has its own HTTP connection
+            # Build the service
+            self.service = build('sheets', 'v4', credentials=self.creds, cache_discovery=False)
+            self.logger.info("Successfully authenticated with Google Sheets using Service Account")
             
-            try:
-                # Force use of modern TLS by setting environment-level SSL context
-                ssl_context = ssl.create_default_context()
-                ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-                
-                # Build service - the google-api-python-client will use the default SSL context
-                self.service = build('sheets', 'v4', credentials=self.creds, cache_discovery=False)
-                self.logger.info("Successfully authenticated with Google Sheets")
-                
-            except Exception as ssl_error:
-                self.logger.warning(f"SSL context setup failed: {ssl_error}")
-                # Try with basic build as fallback
-                self.service = build('sheets', 'v4', credentials=self.creds, cache_discovery=False)
-                self.logger.info("Successfully authenticated with Google Sheets (fallback)")
-                
             return True
             
         except Exception as e:
@@ -245,11 +217,11 @@ class GoogleSheetsService:
             # Build station mapping dynamically
             station_columns = {}
             
-            # Known fixed columns (originalid, firstname, lastname, mobilenumber)
-            expected_fixed_cols = ['originalid', 'firstname', 'lastname', 'mobilenumber']
+            # Known fixed columns (originalid, firstname, lastname, mobilenumber, wristband)
+            expected_fixed_cols = ['originalid', 'firstname', 'lastname', 'mobilenumber', 'wristband']
             
-            # Start from column E (index 4) to look for station headers (mobile number is in column D)
-            for i, header in enumerate(headers[4:], start=4):
+            # Start from column F (index 5) to look for station headers (wristband is in column E)
+            for i, header in enumerate(headers[5:], start=5):
                 try:
                     if header and isinstance(header, str) and header.strip():  # Only process string headers
                         # Skip any non-alphabetic content (images, formulas, etc.)
@@ -281,13 +253,13 @@ class GoogleSheetsService:
                     self.logger.debug("Using cached fallback stations")
             
             # Fallback to hardcoded stations (cached to avoid repeated failures)
-            # Note: Station columns shifted right due to mobile number in column D
+            # Note: Station columns start from F (wristband is in column E)
             fallback_stations = {
-                'reception': 'E',
-                'lio': 'F', 
-                'juntos': 'G',
-                'experimental': 'H',
-                'unvrs': 'I'
+                'reception': 'F',
+                'lio': 'G', 
+                'juntos': 'H',
+                'experimental': 'I',
+                'unvrs': 'J'
             }
             self._cached_stations = fallback_stations
             return fallback_stations
@@ -378,8 +350,11 @@ class GoogleSheetsService:
                         # Get mobile number from column D (index 3) if available
                         mobile_number = row[3] if len(row) > 3 else None
                         
-                        # Initialize guest with dynamic stations and mobile number
-                        guest = GuestRecord(original_id, firstname, lastname, station_names, mobile_number)
+                        # Get wristband UUID from column E (index 4) if available
+                        wristband_uuid = row[4] if len(row) > 4 and row[4].strip() else None
+                        
+                        # Initialize guest with dynamic stations, mobile number, and wristband UUID
+                        guest = GuestRecord(original_id, firstname, lastname, station_names, mobile_number, wristband_uuid)
                         
                         # Dynamically load check-ins based on detected stations
                         for col_letter, station_name in col_to_station.items():
@@ -527,6 +502,47 @@ class GoogleSheetsService:
         except Exception as e:
             self.logger.error(f"Error marking attendance: {e}")
             return False
+
+    def write_wristband_uuid(self, original_id: int, uuid_value: str) -> bool:
+        """
+        Write wristband UUID to column E for a specific guest.
+        
+        Args:
+            original_id: Guest's original ID
+            uuid_value: UUID to write to the wristband column
+            
+        Returns:
+            bool: True if successful
+        """
+        try:
+            # First, find the guest to get their row number
+            guest = self.find_guest_by_id(original_id)
+            if not guest:
+                self.logger.error(f"Guest {original_id} not found")
+                return False
+                
+            # Write to column E (wristband column)
+            range_name = f"{self.sheet_name}!E{guest.row_number}"
+            
+            body = {
+                'values': [[uuid_value]]
+            }
+            
+            self._make_api_call(
+                lambda: self._get_thread_safe_service().spreadsheets().values().update(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=range_name,
+                    valueInputOption='RAW',
+                    body=body
+                ).execute()
+            )
+            
+            self.logger.info(f"Wrote wristband UUID {uuid_value} for guest {original_id} (Column E)")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error writing wristband UUID: {e}")
+            return False
     
     def get_available_stations(self, fast_fail_startup=False) -> List[str]:
         """
@@ -615,7 +631,7 @@ class GoogleSheetsService:
             return False
             
     def clear_all_check_in_data(self) -> bool:
-        """Clear all check-in data from Google Sheets (columns E-I, preserving mobile numbers in D)."""
+        """Clear all check-in data from Google Sheets (columns E-I, preserving mobile numbers in D only)."""
         try:
             # Get all rows to determine range (extending to I due to column shift)
             range_name = f"{self.sheet_name}!A:I"
@@ -631,11 +647,11 @@ class GoogleSheetsService:
                 self.logger.info("No check-in data to clear")
                 return True
                 
-            # Clear check-in columns (E-I) for all data rows, preserving mobile numbers in D
+            # Clear wristband and check-in columns (E-I) for all data rows, preserving mobile numbers in D only
             clear_range = f"{self.sheet_name}!E2:I{len(values)}"
             
             # Create empty values for clearing (5 columns: E, F, G, H, I)
-            clear_values = [[""] * 5 for _ in range(len(values) - 1)]  # 5 columns, all rows except header
+            clear_values = [[""] * 5 for _ in range(len(values) - 1)]  # 5 columns (wristband + 4 check-in), all rows except header
             
             body = {
                 'values': clear_values
@@ -650,7 +666,7 @@ class GoogleSheetsService:
                 ).execute()
             )
             
-            self.logger.warning(f"Cleared all check-in data from Google Sheets ({len(clear_values)} rows)")
+            self.logger.warning(f"Cleared all wristband and check-in data from Google Sheets ({len(clear_values)} rows)")
             return True
             
         except Exception as e:
