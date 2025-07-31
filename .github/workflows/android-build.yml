@@ -66,7 +66,7 @@ jobs:
         # Crypto/Auth: pyasn1, pyasn1-modules, rsa, PyJWT, cryptography, cachetools
         # HTTP/Network: requests, urllib3, certifi, charset-normalizer, idna
         # Utilities: filetype, six, pyparsing, pathlib2
-        sed -i 's/^requirements = .*/requirements = python3,kivy==2.3.1,kivymd,plyer,pyjnius,google-api-python-client,google-auth,google-auth-oauthlib,google-auth-httplib2,httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa,requests-oauthlib,oauthlib,pyasn1,googleapis-common-protos,protobuf,certifi,urllib3,PyJWT,cryptography,pathlib2,six,filetype,requests,charset-normalizer,idna,pyparsing,oauth2client/' buildozer.spec
+        sed -i 's/^requirements = .*/requirements = python3,kivy==2.3.1,kivymd,plyer,pyjnius,google-api-python-client,google-auth,httplib2,google-api-core,uritemplate,cachetools,pyasn1-modules,rsa,pyasn1,googleapis-common-protos,protobuf,certifi,urllib3,PyJWT,cryptography,pathlib2,six,filetype,requests,charset-normalizer,idna,pyparsing/' buildozer.spec
         
         # CRITICAL: Include JSON, assets, and other data files in the APK
         sed -i 's/^source\.include_exts = .*/source.include_exts = py,png,jpg,kv,atlas,json,txt/' buildozer.spec
@@ -79,17 +79,12 @@ jobs:
         mkdir -p config
         
         # Decode and save config files from secrets
-        echo "${{ secrets.CREDENTIALS_JSON }}" | base64 -d > credentials.json
-        echo "${{ secrets.TOKEN_JSON }}" | base64 -d > token.json
+        echo "${{ secrets.SERVICE_ACCOUNT_JSON }}" | base64 -d > service-account.json
         echo "${{ secrets.CONFIG_JSON }}" | base64 -d > config.json
         
-        # Update config.json to remove "config/" prefix from paths  
-        sed -i 's|"config/credentials.json"|"credentials.json"|g' config.json
-        sed -i 's|"config/token.json"|"token.json"|g' config.json
-        
-        # Also update credentials_file and token_file paths
-        sed -i 's|"credentials_file": "config/credentials.json"|"credentials_file": "credentials.json"|g' config.json
-        sed -i 's|"token_file": "config/token.json"|"token_file": "token.json"|g' config.json
+        # Update config.json to use service account file in same directory
+        sed -i 's|"config/service-account.json"|"service-account.json"|g' config.json
+        sed -i 's|"service_account_file": "config/service-account.json"|"service_account_file": "service-account.json"|g' config.json
         
         echo "✅ Config files created from secrets"
         ls -la *.json
@@ -112,10 +107,8 @@ jobs:
           # CRITICAL: Update config.json to point to same directory paths (not config/ subdirectory)  
           if [ -f "config.json" ]; then
             echo "📝 Updating config.json paths to point to same directory as main.py..."
-            sed -i 's|"config/credentials.json"|"credentials.json"|g' config.json
-            sed -i 's|"config/token.json"|"token.json"|g' config.json
-            sed -i 's|"credentials_file": "config/credentials.json"|"credentials_file": "credentials.json"|g' config.json
-            sed -i 's|"token_file": "config/token.json"|"token_file": "token.json"|g' config.json
+            sed -i 's|"config/service-account.json"|"service-account.json"|g' config.json
+            sed -i 's|"service_account_file": "config/service-account.json"|"service_account_file": "service-account.json"|g' config.json
             echo "✅ Updated config.json paths for same-directory inclusion"
           fi
           
@@ -155,8 +148,8 @@ jobs:
         fi
         
         # Set app metadata for our enhanced version
-        sed -i 's/^title = .*/title = TP NFC - Enhanced/' buildozer.spec
-        sed -i 's/^package\.name = .*/package.name = tpnfcenhanced/' buildozer.spec
+        sed -i 's/^title = .*/title = Guest Manager/' buildozer.spec
+        sed -i 's/^package\.name = .*/package.name = tpnfclib/' buildozer.spec
         sed -i 's/^package\.domain = .*/package.domain = com.tpnfc/' buildozer.spec
         sed -i 's/^version = .*/version = 2.0/' buildozer.spec
         

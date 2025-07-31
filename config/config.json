@@ -10,8 +10,7 @@
   },
   "google_sheets": {
     "spreadsheet_id": "1x1HvvfYYp-SlhljTP5lebyZLAu21PVNEDTAe8w3SR-A",
-    "credentials_file": "config/credentials.json",
-    "token_file": "config/token.json",
+    "service_account_file": "config/service-account.json",
     "scopes": [
       "https://www.googleapis.com/auth/spreadsheets"
     ],

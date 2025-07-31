@@ -9,12 +9,9 @@ from typing import List, Dict, Optional, Any
 from pathlib import Path
 import json
 
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
+from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-import pickle
 
 try:
     from ..models import GuestRecord
@@ -43,41 +40,31 @@ class GoogleSheetsService:
         
     def authenticate(self) -> bool:
         """
-        Authenticate with Google Sheets API.
+        Authenticate with Google Sheets API using Service Account.
         
         Returns:
             bool: True if authenticated successfully
         """
         try:
-            token_file = Path(self.config['token_file'])
-            creds_file = Path(self.config['credentials_file'])
+            service_account_file = self.config.get('service_account_file')
+            if not service_account_file:
+                self.logger.error("service_account_file not specified in config")
+                return False
+                
+            service_account_path = Path(service_account_file)
+            if not service_account_path.exists():
+                self.logger.error(f"Service account file not found: {service_account_path}")
+                return False
             
-            # Load existing token
-            if token_file.exists():
-                with open(token_file, 'rb') as token:
-                    self.creds = pickle.load(token)
-                    
-            # If there are no (valid) credentials available, let the user log in
-            if not self.creds or not self.creds.valid:
-                if self.creds and self.creds.expired and self.creds.refresh_token:
-                    self.creds.refresh(Request())
-                else:
-                    if not creds_file.exists():
-                        self.logger.error(f"Credentials file not found: {creds_file}")
-                        self.logger.error("Please download credentials.json from Google Cloud Console")
-                        return False
-                        
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        str(creds_file), self.config['scopes'])
-                    self.creds = flow.run_local_server(port=0)
-                    
-                # Save the credentials for the next run
-                with open(token_file, 'wb') as token:
-                    pickle.dump(self.creds, token)
-                    
+            # Authenticate using Service Account
+            self.creds = Credentials.from_service_account_file(
+                str(service_account_path),
+                scopes=self.config.get('scopes', ['https://www.googleapis.com/auth/spreadsheets'])
+            )
+            
             # Build the service
             self.service = build('sheets', 'v4', credentials=self.creds)
-            self.logger.info("Successfully authenticated with Google Sheets")
+            self.logger.info("Successfully authenticated with Google Sheets using Service Account")
             return True
             
         except Exception as e:

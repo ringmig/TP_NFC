@@ -39,6 +39,7 @@ logs/*.log
 *.log
 
 # Configuration files (sensitive data)
+config/service-account.json
 config/credentials.json
 config/token.json
 config/token.pickle
@@ -79,6 +80,7 @@ Android/0_build.txt
 
 # Android root config files (should only be in config/ subdirectory)
 Android/*.json
+Android/service-account.json
 Android/logo.png
 !Android/buildozer*.spec
 !Android/requirements.txt

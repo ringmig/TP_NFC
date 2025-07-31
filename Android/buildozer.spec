@@ -1,10 +1,10 @@
 [app]
 
 # (str) Title of your application
-title = La Isla Bonita
+title = Guest Manager
 
 # (str) Package name
-package.name = tpnfcenhanced
+package.name = tpnfclib
 
 # (str) Package domain (needed for android/ios packaging)
 package.domain = com.tpnfc
@@ -72,8 +72,8 @@ android.archs = arm64-v8a,armeabi-v7a
 # (str) Android entry point, default is ok for Kivy-based app
 android.entrypoint = org.kivy.android.PythonActivity
 
-# (str) Presplash background color (use #RRGGBB format) - dark grey to match app
-android.presplash_color = #191919
+# (str) Presplash background color (use #RRGGBB format) - pure black
+android.presplash_color = #000000
 
 # (bool) Enable AndroidX support. Enable when 'android.gradle_dependencies'
 # contains an 'androidx' package, or any package from Kotlin source.
